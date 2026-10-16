@@ -68,7 +68,7 @@ app.get('/api/search', verifyToken, async (req, res) => {
     let errorMsg = null;
 
     const fetchTable = async (tableName) => {
-        let query = supabase.from(tableName).select('*').limit(100); 
+        let query = supabase.from(tableName).select('*').limit(10000); 
         
         // Using ilike to bypass strict whitespace/casing mismatches in the DB
         if (state) query = query.ilike('State', `%${state}%`);
