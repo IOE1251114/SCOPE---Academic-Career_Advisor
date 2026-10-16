@@ -1,170 +1,199 @@
 // app.js
-const authForm = document.getElementById('auth-form');
-const emailInput = document.getElementById('email');
-const passwordInput = document.getElementById('password');
-const authMessage = document.getElementById('auth-message');
-const authContainer = document.getElementById('auth-container');
-const dashboardContainer = document.getElementById('dashboard-container');
-const signupBtn = document.getElementById('signup-btn');
-const logoutBtn = document.getElementById('logout-btn');
 
-// Change from 'http://localhost:3000/api' to relative path
-const API_URL = '/api'; 
+const API_URL = "/api";
 
+document.addEventListener("DOMContentLoaded", () => {
+  // ==========================================
+  // 1. LANDING PAGE LOGIC (index.html)
+  // ==========================================
+  const navSignInBtn = document.getElementById("nav-signin-btn");
+  if (navSignInBtn) {
+    navSignInBtn.addEventListener("click", () => {
+      window.location.href = "login.html";
+    });
+  }
 
-// Handle Login
-authForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    await authenticate('/login');
-});
+  // ==========================================
+  // 2. AUTHENTICATION LOGIC (login.html)
+  // ==========================================
+  const loginBtn = document.getElementById("login-btn");
+  const signupBtn = document.getElementById("signup-btn");
+  const emailInput = document.getElementById("email");
+  const passwordInput = document.getElementById("password");
+  const authError = document.getElementById("auth-error");
 
-// Handle Signup
-signupBtn.addEventListener('click', async () => {
-    if (!emailInput.value || !passwordInput.value) {
-        authMessage.textContent = "Please enter both email and password to sign up.";
-        return;
+  if (loginBtn && signupBtn) {
+    // If the user is already logged in, redirect them immediately to the database
+    if (localStorage.getItem("scope_token")) {
+      window.location.href = "college.html";
     }
-    await authenticate('/signup');
-});
 
-// Authentication Function
-async function authenticate(endpoint) {
-    try {
+    const authenticate = async (endpoint) => {
+      if (!emailInput.value || !passwordInput.value) {
+        authError.style.color = "#ff4444";
+        authError.textContent = "Please enter both email and password.";
+        return;
+      }
+
+      try {
         const response = await fetch(`${API_URL}${endpoint}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                email: emailInput.value,
-                password: passwordInput.value
-            })
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: emailInput.value,
+            password: passwordInput.value,
+          }),
         });
 
-        const result = await response.json();
+        // Read response safely as text once to avoid body locking errors
+        const text = await response.text(); 
+        let result;
+        
+        try {
+          result = JSON.parse(text);
+        } catch (e) {
+          console.error("Server returned non-JSON response:", text);
+          throw new Error("Server error: Received an invalid response format.");
+        }
 
         if (!response.ok) {
-            throw new Error(result.error || 'Authentication failed');
+          throw new Error(result.error || "Authentication failed");
         }
 
-        if (endpoint === '/login') {
-            localStorage.setItem('scope_token', result.token);
-            authMessage.style.color = 'green';
-            authMessage.textContent = 'Login successful!';
-            showDashboard();
+        if (endpoint === "/login") {
+          // Save token and jump to database
+          localStorage.setItem("scope_token", result.token);
+          window.location.href = "college.html";
         } else {
-            authMessage.style.color = 'green';
-            authMessage.textContent = result.message;
+          authError.style.color = "#00E5FF";
+          authError.textContent =
+            result.message || "Sign up successful! Please Sign In.";
         }
-    } catch (error) {
-        authMessage.style.color = 'red';
-        authMessage.textContent = error.message;
+      } catch (error) {
+        authError.style.color = "#ff4444";
+        authError.textContent = error.message;
+      }
+    };
+
+    loginBtn.addEventListener("click", () => authenticate("/login"));
+    signupBtn.addEventListener("click", () => authenticate("/signup"));
+  }
+
+  // ==========================================
+  // 3. DATABASE & FILTER LOGIC (college.html)
+  // ==========================================
+  const applyFiltersBtn = document.getElementById("apply-filters-btn");
+
+  if (applyFiltersBtn) {
+    // Enforce Authentication: Kick users back to login if they have no token
+    const token = localStorage.getItem("scope_token");
+    if (!token) {
+      alert("Please sign in to access the database.");
+      window.location.href = "login.html";
+      return;
     }
-}
 
-// Handle UI State
-function showDashboard() {
-    authContainer.style.display = 'none';
-    dashboardContainer.style.display = 'block';
-    fetchFilteredData(); 
-}
+    const list = document.getElementById("college-list");
+    const levelFilter = document.getElementById("level-filter");
+    const collTypeFilter = document.getElementById("coll-type-filter");
 
-// Handle Logout
-logoutBtn.addEventListener('click', () => {
-    localStorage.removeItem('scope_token');
-    authContainer.style.display = 'block';
-    dashboardContainer.style.display = 'none';
-    emailInput.value = '';
-    passwordInput.value = '';
-    authMessage.textContent = '';
-});
+    // Dynamic Filter Adjustment: Hide "College Type" if "University" is selected
+    levelFilter.addEventListener("change", (e) => {
+      if (e.target.value === "university") {
+        collTypeFilter.parentElement.style.display = "none";
+        collTypeFilter.value = "all";
+      } else {
+        collTypeFilter.parentElement.style.display = "flex";
+      }
+    });
 
-// Filter UI Logic
-const filterLevelDropdown = document.getElementById('filter-level');
-const collTypeDropdown = document.getElementById('filter-coll-type');
-const collTypeLabel = document.querySelector('label[for="filter-coll-type"]');
+    // Search and Render Function
+    const fetchFilteredData = async () => {
+      const level = levelFilter.value;
+      const state = document.getElementById("state-filter").value;
+      const location = document.getElementById("location-filter").value;
+      const univType = document.getElementById("univ-type-filter").value;
+      const collType = collTypeFilter.value;
 
-filterLevelDropdown.addEventListener('change', (e) => {
-    if (e.target.value === 'university') {
-        collTypeDropdown.style.display = 'none';
-        collTypeLabel.style.display = 'none';
-        collTypeDropdown.value = ''; 
-    } else {
-        collTypeDropdown.style.display = 'block';
-        collTypeLabel.style.display = 'block';
-    }
-});
+      const params = new URLSearchParams();
+      if (level !== "all") params.append("level", level);
+      if (state !== "all") params.append("state", state);
+      if (location !== "all") params.append("location_type", location);
+      if (univType !== "all") params.append("univ_type", univType);
+      if (collType !== "all" && level !== "university")
+        params.append("coll_type", collType);
 
-// Single Event Listener for Data Fetching
-document.getElementById('apply-filters-btn').addEventListener('click', fetchFilteredData);
+      list.innerHTML =
+        '<p style="color:#00E5FF; text-align:center; grid-column: 1 / -1;">Loading institutions...</p>';
 
-async function fetchFilteredData() {
-    const token = localStorage.getItem('scope_token');
-    if (!token) return;
-
-    const level = document.getElementById('filter-level').value;
-    const state = document.getElementById('filter-state').value;
-    const location = document.getElementById('filter-location').value;
-    const univType = document.getElementById('filter-univ-type').value;
-    const collType = document.getElementById('filter-coll-type').value;
-
-    const params = new URLSearchParams();
-    if (level !== 'both') params.append('level', level);
-    if (state) params.append('state', state);
-    if (location) params.append('location_type', location);
-    if (univType) params.append('univ_type', univType);
-    if (collType && level !== 'university') params.append('coll_type', collType);
-
-    const loader = document.getElementById('loading-indicator');
-    const list = document.getElementById('college-list');
-    
-    loader.style.display = 'block';
-    list.innerHTML = '';
-
-    try {
+      try {
+        // Fetch data using the secure token
         const response = await fetch(`${API_URL}/search?${params.toString()}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
+          headers: { Authorization: `Bearer ${token}` },
         });
-        
-        const data = await response.json();
-        loader.style.display = 'none';
 
-        if (!response.ok) throw new Error(data.error || 'Failed to fetch');
-        
-        if (data.length === 0) {
-            list.innerHTML = '<p>No institutions match your filters.</p>';
-            return;
+        const text = await response.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch (e) {
+          throw new Error("Failed to parse search results from server.");
         }
 
-        list.innerHTML = data.map(item => {
-            const isUniversity = item.entityType === 'University' || !item.College_type;
-            const badgeLabel = isUniversity ? 'University' : 'College';
-            
+        if (!response.ok) throw new Error(data.error || "Failed to fetch");
+
+        if (data.length === 0) {
+          list.innerHTML =
+            '<p style="color:#ccc; text-align:center; grid-column: 1 / -1;">No institutions match your filters.</p>';
+          return;
+        }
+
+        // Render Results
+        list.innerHTML = data
+          .map((item) => {
+            const isUniversity =
+              item.entityType === "University" || !item.College_type;
+            const badgeLabel = isUniversity ? "University" : "College";
+            const badgeClass = isUniversity ? "badge-univ" : "badge-coll";
+
+            const name =
+              item.Name || item.University_name || "Unknown Institution";
+            const estYear =
+              item.Established_year || item.Establishment_year || "N/A";
+            const instType = isUniversity
+              ? item.University_Type
+              : item.College_type;
+
+            const siteUrl =
+              item.Website && item.Website !== "-" ? item.Website : null;
+            const websiteHtml = siteUrl
+              ? `<a href="${siteUrl.startsWith("http") ? siteUrl : "https://" + siteUrl}" target="_blank" class="website-link">Visit Website</a>`
+              : `<span class="no-website">No website available</span>`;
+
             return `
-            <div class="college-card">
-                <span class="badge ${isUniversity ? 'badge-univ' : 'badge-coll'}">${badgeLabel}</span>
-                <h3>${item.Name}</h3>
-                <div class="card-details">
-                    ${item.University_name ? `<p><strong>Affiliated To:</strong> ${item.University_name}</p>` : ''}
-                    <p><strong>Established:</strong> ${item.Established_year || item.Establishment_year || 'N/A'}</p>
-                    <p><strong>Type:</strong> ${isUniversity ? item.University_Type : item.College_type}</p>
-                    <p><strong>Location:</strong> ${item.Location_type}, ${item.State}</p>
-                </div>
-                ${item.Website && item.Website !== '-' 
-                    ? `<a href="${item.Website.startsWith('http') ? item.Website : 'https://' + item.Website}" target="_blank" class="website-link">Visit Website</a>` 
-                    : `<span class="no-website">No website available</span>`
-                }
-            </div>
-            `;
-        }).join('');
+                    <div class="college-card">
+                        <span class="badge ${badgeClass}">${badgeLabel}</span>
+                        <h3>${name}</h3>
+                        <div class="card-details">
+                            ${!isUniversity && item.University_name ? `<p><strong>Affiliated To:</strong> ${item.University_name}</p>` : ""}
+                            <p><strong>Established:</strong> ${estYear}</p>
+                            <p><strong>Type:</strong> ${instType || "N/A"}</p>
+                            <p><strong>Location:</strong> ${item.Location_type || "N/A"}, ${item.State || "N/A"}</p>
+                        </div>
+                        ${websiteHtml}
+                    </div>
+                    `;
+          })
+          .join("");
+      } catch (error) {
+        console.error("Search error:", error);
+        list.innerHTML = `<p style="color:#ff4444; text-align:center; grid-column: 1 / -1;">Error: ${error.message}</p>`;
+      }
+    };
 
-    } catch (error) {
-        console.error('Search error:', error);
-        loader.style.display = 'none';
-        list.innerHTML = `<p style="color:red;">Error: ${error.message}</p>`;
-    }
-}
+    applyFiltersBtn.addEventListener("click", fetchFilteredData);
 
-window.onload = () => {
-    if (localStorage.getItem('scope_token')) {
-        showDashboard();
-    }
-};
+    // Auto-load data immediately when the college database page opens
+    fetchFilteredData();
+  }
+});

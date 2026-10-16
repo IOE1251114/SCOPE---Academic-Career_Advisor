@@ -15,6 +15,8 @@ if (!supabaseUrl || !supabaseKey) {
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 const app = express();
+app.use(express.static('./')); // Serves all your HTML/CSS/JS files from the root folder
+
 app.use(cors());
 app.use(express.json());
 

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scope | Authentication</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/png" href="images/logo.png">
+    
+    <style>
+        /* Login specific layout and theming */
+        .auth-header {
+            padding: 20px 40px;
+            background: linear-gradient(to bottom, rgba(0,229,255,0.1), transparent);
+            border-bottom: 1px solid #4B5DE4;
+        }
+        
+        .nav-link {
+            color: #00E5FF;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        
+        .nav-link:hover {
+            color: white;
+            text-decoration: underline;
+        }
+
+        .auth-wrapper {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: calc(100vh - 80px); /* Adjusts for header height */
+            background-image: url('images/back.png');
+            background-size: cover;
+            background-position: center;
+            background-blend-mode: overlay;
+            background-color: rgba(0, 0, 0, 0.8); /* Darkens the background image */
+        }
+
+        .auth-container {
+            background-color: rgba(0, 0, 0, 0.85);
+            border: 2px solid #4B5DE4;
+            border-radius: 12px;
+            padding: 40px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 0 25px rgba(0, 229, 255, 0.15);
+        }
+
+        .auth-container h2 {
+            text-align: center;
+            color: #00E5FF;
+            margin-bottom: 30px;
+            font-size: 24px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .auth-form {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .auth-form input {
+            background-color: rgba(255, 255, 255, 0.05);
+            border: 1px solid #4B5DE4;
+            color: white;
+            padding: 14px 15px;
+            border-radius: 8px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .auth-form input::placeholder {
+            color: #888;
+        }
+
+        .auth-form input:focus {
+            outline: none;
+            border-color: #00E5FF;
+            box-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .auth-buttons {
+            display: flex;
+            gap: 15px;
+            margin-top: 10px;
+        }
+
+        .auth-buttons button {
+            flex: 1;
+            height: 45px;
+            border-radius: 8px;
+        }
+
+        /* Differentiating the Sign Up button visually */
+        #signup-btn {
+            border-color: #4B5DE4;
+            color: #4B5DE4;
+        }
+
+        #signup-btn:hover {
+            background-color: #4B5DE4;
+            color: white;
+        }
+
+        #auth-error {
+            color: #ff4444;
+            margin-top: 15px;
+            text-align: center;
+            font-size: 13px;
+            font-family: Arial, sans-serif;
+            min-height: 15px;
+        }
+    </style>
+</head>
+<body>
+
+    <header class="auth-header">
+        <a href="index.html" class="nav-link">← Back to Home</a>
+    </header>
+
+    <main class="auth-wrapper">
+        <div class="auth-container">
+            <h2>Access Scope</h2>
+            <div class="auth-form">
+                <input type="email" id="email" placeholder="Enter your email address" required>
+                <input type="password" id="password" placeholder="Enter your password" required>
+                
+                <div class="auth-buttons">
+                    <button id="login-btn">Sign In</button>
+                    <button id="signup-btn">Sign Up</button>
+                </div>
+            </div>
+            <div id="auth-error"></div>
+        </div>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
