@@ -1,0 +1,1 @@
+https://scope-academic-career-advisor.vercel.app/college.html : link to SCOPE:Your academic and career advisor website which contains the complete database of all the colleges and universities across INDIA!
