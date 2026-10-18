@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scope | Examinations Database</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/png" href="images/logo.png">
+    
+    <style>
+        /* Database & Hero Specific Styling */
+        body {
+            background-color: black;
+            color: white;
+            font-family: Arial Black, Helvetica, sans-serif;
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        .db-header {
+            padding: 15px 40px;
+            background-color: rgba(0, 0, 0, 0.9);
+            border-bottom: 2px solid #4B5DE4;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            background-image: url('images/scope.png');
+            background-size: contain;
+            background-repeat: no-repeat;
+            width: 150px;
+            height: 40px;
+            display: flex;
+            align-content: center;
+        }
+
+        .nav-link {
+            color: #00E5FF;
+            text-decoration: none;
+            font-size: 14px;
+            font-family: Arial Black, Helvetica, sans-serif;
+            border: 2px solid #00E5FF;
+            padding: 8px 15px;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+        
+        .nav-link:hover {
+            background-color: #00E5FF;
+            color: black;
+        }
+
+        /* Hero Section */
+        .db-hero {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            background-image: url('images/back.png');
+            background-size: cover;
+            background-position: center;
+            height: 300px;
+            width: 100%;
+            text-shadow: 0 0 25px black;
+            font-size: 28px;
+            text-align: center;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .name {
+            font-family: Arial Black, Helvetica, sans-serif;
+            background: linear-gradient(to bottom, #00E5FF, #29CBE3, #4B5DE4);
+            background-clip: text;
+            -webkit-background-clip: text;
+            color: transparent;
+            font-size: 35px;
+            text-shadow: none;
+            margin-top: 10px;
+        }
+
+        /* Dashboard Layout */
+        .dashboard {
+            display: flex;
+            gap: 25px;
+            padding: 30px 40px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .sidebar {
+            width: 320px;
+            background-color: rgba(0, 0, 0, 0.7);
+            border: 3px solid #4B5DE4;
+            border-radius: 10px;
+            padding: 20px;
+            height: fit-content;
+            position: sticky;
+            top: 20px;
+        }
+
+        .sidebar h2 {
+            color: #00E5FF;
+            margin-bottom: 20px;
+            font-size: 18px;
+            border-bottom: 1px solid #4B5DE4;
+            padding-bottom: 10px;
+            text-transform: uppercase;
+        }
+
+        .filter-group {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .filter-group label {
+            font-size: 11px;
+            color: #ccc;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            font-family: Arial, sans-serif;
+            letter-spacing: 1px;
+        }
+
+        .filter-group select, 
+        .filter-group input[type="text"], 
+        button#apply-exam-filters-btn {
+            width: 100%;
+            border: 2px solid #4B5DE4;
+            background-color: black;
+            color: white;
+            border-radius: 8px;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 12px;
+            height: 40px;
+            padding: 0 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-sizing: border-box;
+        }
+
+        .filter-group select:hover, 
+        .filter-group input[type="text"]:focus, 
+        button#apply-exam-filters-btn:hover {
+            border-color: #00E5FF;
+            outline: none;
+            box-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
+        }
+
+        .filter-group select {
+            font-family: Arial Black, Helvetica, sans-serif;
+        }
+
+        button#apply-exam-filters-btn {
+            margin-top: 10px;
+            background-color: #4B5DE4;
+            font-family: Arial Black, Helvetica, sans-serif;
+        }
+
+        button#apply-exam-filters-btn:hover {
+            background-color: #00E5FF;
+            color: black;
+        }
+
+        .results-area {
+            flex-grow: 1;
+        }
+
+        #exam-results-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        /* Card Styling */
+        .college-card {
+            background-color: rgba(0, 0, 0, 0.6);
+            border: 3px solid #4B5DE4;
+            border-radius: 10px;
+            padding: 20px;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .college-card:hover {
+            border-color: #00E5FF;
+            transform: translateY(-3px);
+            box-shadow: 0 0 15px rgba(0, 229, 255, 0.2);
+        }
+
+        .college-card h3 {
+            color: white;
+            font-size: 18px;
+            margin: 12px 0;
+            line-height: 1.3;
+        }
+
+        .badge {
+            align-self: flex-start;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+            font-family: Arial, sans-serif;
+        }
+
+        .badge-univ { background-color: #4B5DE4; color: white; }
+        .badge-coll { background-color: #00E5FF; color: black; }
+
+        .card-details p {
+            font-size: 12px;
+            color: #aaa;
+            margin: 6px 0;
+            font-family: Arial, sans-serif;
+        }
+
+        .website-link {
+            margin-top: auto;
+            padding-top: 15px;
+            color: #00E5FF;
+            text-decoration: none;
+            font-size: 13px;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+        }
+
+        .website-link:hover {
+            color: white;
+            text-decoration: underline;
+        }
+
+        .no-website {
+            margin-top: auto;
+            padding-top: 15px;
+            color: #666;
+            font-size: 12px;
+            font-style: italic;
+            font-family: Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Top Navigation Header with Logo -->
+    <header class="db-header">
+        <div class="logo"></div>
+        <a href="index.html" class="nav-link">← Back to Home</a>
+    </header>
+
+    <!-- Hero Section Banner -->
+    <section class="db-hero">
+        Find Institutions Accepting Your Target Exams with
+        <div class="name">SCOPE EXAMS</div>
+    </section>
+
+    <!-- Main Dashboard Body -->
+    <div class="dashboard">
+        <!-- Search Filter Sidebar -->
+        <aside class="sidebar">
+            <h2>Find by Exam</h2>
+            
+            <div class="filter-group">
+                <label>Search Exam Name</label>
+                <input type="text" id="exam-search-input" placeholder="e.g. JEE, NEET, CUET, GATE">
+            </div>
+
+            <div class="filter-group">
+                <label>Exam Category</label>
+                <select id="exam-category-filter">
+                    <option value="both">Both UG & PG Exams</option>
+                    <option value="ug">Undergraduate (UG) Only</option>
+                    <option value="pg">Postgraduate (PG) Only</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>Institution Level</label>
+                <select id="exam-inst-level">
+                    <option value="all">Universities & Colleges</option>
+                    <option value="university">Universities Only</option>
+                    <option value="college">Colleges Only</option>
+                </select>
+            </div>
+
+            <div class="filter-group">
+                <label>State Filter</label>
+                <select id="exam-state-filter">
+                    <option value="all">All States</option>
+                    <option value="Delhi">Delhi</option>
+                    <option value="Maharashtra">Maharashtra</option>
+                    <option value="Karnataka">Karnataka</option>
+                    <option value="Tamil Nadu">Tamil Nadu</option>
+                    <option value="Uttar Pradesh">Uttar Pradesh</option>
+                </select>
+            </div>
+
+            <button id="apply-exam-filters-btn">Search Institutions</button>
+        </aside>
+
+        <!-- Results Display Area -->
+        <main class="results-area">
+            <div id="exam-results-list">
+                <!-- Institution cards will be injected dynamically here -->
+            </div>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
