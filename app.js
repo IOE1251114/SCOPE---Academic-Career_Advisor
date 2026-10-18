@@ -136,7 +136,15 @@ document.addEventListener("DOMContentLoaded", () => {
           throw new Error("Failed to parse search results from server.");
         }
 
-        if (!response.ok) throw new Error(data.error || "Failed to fetch");
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            localStorage.removeItem("scope_token"); 
+            alert("Your session has expired. Please sign in again.");
+            window.location.href = "login.html"; 
+            return;
+          }
+          throw new Error(data.error || "Failed to fetch");
+        }
 
         if (data.length === 0) {
           list.innerHTML = '<p style="color:#ccc; text-align:center; grid-column: 1 / -1;">No institutions match your filters.</p>';
@@ -259,7 +267,16 @@ document.addEventListener("DOMContentLoaded", () => {
         });
 
         const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Failed to fetch");
+        
+        if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            localStorage.removeItem("scope_token"); 
+            alert("Your session has expired. Please sign in again.");
+            window.location.href = "login.html";
+            return;
+          }
+          throw new Error(data.error || "Failed to fetch");
+        }
 
         if (data.length === 0) {
           examList.innerHTML = '<p style="color:#ccc; text-align:center; grid-column: 1 / -1;">No institutions found accepting this exam.</p>';
