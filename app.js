@@ -97,8 +97,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const list = document.getElementById("college-list");
     const levelFilter = document.getElementById("level-filter");
     const collTypeFilter = document.getElementById("coll-type-filter");
-    const ugExamFilter = document.getElementById("ug-exam-filter");
-    const pgExamFilter = document.getElementById("pg-exam-filter");
 
     levelFilter.addEventListener("change", (e) => {
       if (e.target.value === "university") {
@@ -115,10 +113,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const location = document.getElementById("location-filter").value;
       const univType = document.getElementById("univ-type-filter").value;
       const collType = collTypeFilter.value;
-      const ugExam = ugExamFilter ? ugExamFilter.value.trim() : "";
-      const pgExam = pgExamFilter ? pgExamFilter.value.trim() : "";
 
-      // ONLY append safe columns to the backend request
       const params = new URLSearchParams();
       if (level !== "all") params.append("level", level);
       if (state !== "all") params.append("state", state);
@@ -148,9 +143,7 @@ document.addEventListener("DOMContentLoaded", () => {
           throw new Error(data.error || "Failed to fetch");
         }
 
-        // --- CLIENT SIDE FILTERING (Bypasses Backend Column Errors) ---
-        
-        // 1. Filter by University Type (Forgiving Match)
+        // --- CLIENT SIDE FILTERING ---
         if (univType !== "all") {
             data = data.filter(item => {
                 const uType = item.University_Type || item.University_type || item.university_type || "";
@@ -158,16 +151,14 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         }
 
-        // 2. Filter by College Type
         if (collType !== "all" && level !== "university") {
             data = data.filter(item => {
-                if (item.entityType === "University") return true; // Keep universities if viewing both
+                if (item.entityType === "University") return true; 
                 const cType = item.College_type || item.college_type || "";
                 return cType.toLowerCase().includes(collType.toLowerCase());
             });
         }
 
-        // 3. Filter by Location
         if (location !== "all") {
             data = data.filter(item => {
                 const loc = item.Location_type || item.location_type || item.Location || "";
@@ -175,42 +166,10 @@ document.addEventListener("DOMContentLoaded", () => {
             });
         }
 
-        // 4. Filter by Exams
-        if (ugExam || pgExam) {
-            data = data.filter(item => {
-                const isUniv = item.entityType === "University" || !item.College_type;
-                const ugExams = isUniv ? item.university_ug_exams : item.college_ug_exams;
-                const pgExams = isUniv ? item.university_pg_exams : item.college_pg_exams;
-                
-                const checkExam = (arr, search) => {
-                    if (!arr) return false;
-                    return arr.some(obj => {
-                        const keys = Object.keys(obj).filter(k => !k.includes('CODE') && !k.includes('id'));
-                        return keys.some(k => obj[k] && obj[k].toString().toLowerCase().includes(search.toLowerCase()));
-                    });
-                };
-
-                let pass = true;
-                if (ugExam && !checkExam(ugExams, ugExam)) pass = false;
-                if (pgExam && !checkExam(pgExams, pgExam)) pass = false;
-                return pass;
-            });
-        }
-        // --------------------------------------------------------------
-
         if (data.length === 0) {
           list.innerHTML = '<p style="color:#ccc; text-align:center; grid-column: 1 / -1;">No institutions match your filters.</p>';
           return;
         }
-
-        const extractExams = (examArray) => {
-            if (!examArray || examArray.length === 0) return "Not Specified";
-            const names = examArray.map(obj => {
-                const keys = Object.keys(obj).filter(k => !k.includes('CODE') && !k.includes('id'));
-                return obj[keys[0]]; 
-            }).filter(Boolean);
-            return names.join(", ") || "Not Specified";
-        };
 
         list.innerHTML = data.map((item) => {
             const isUniversity = item.entityType === "University" || !item.College_type;
@@ -221,9 +180,6 @@ document.addEventListener("DOMContentLoaded", () => {
             const estYear = item.Established_year || item.Establishment_year || "N/A";
             const instType = isUniversity ? item.University_Type || item.University_type : item.College_type || item.college_type;
             const loc = item.Location_type || item.location_type || item.Location || "N/A";
-            
-            const ugExamsList = isUniversity ? extractExams(item.university_ug_exams) : extractExams(item.college_ug_exams);
-            const pgExamsList = isUniversity ? extractExams(item.university_pg_exams) : extractExams(item.college_pg_exams);
 
             const siteUrl = item.Website && item.Website !== "-" ? item.Website : null;
             const websiteHtml = siteUrl
@@ -239,10 +195,6 @@ document.addEventListener("DOMContentLoaded", () => {
                             <p><strong>Established:</strong> ${estYear}</p>
                             <p><strong>Type:</strong> ${instType || "N/A"}</p>
                             <p><strong>Location:</strong> ${loc}, ${item.State || "N/A"}</p>
-                            <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 5px;">
-                                <p style="color: #00E5FF; margin-bottom: 3px;"><strong>UG Exams:</strong> ${ugExamsList}</p>
-                                <p style="color: #00E5FF;"><strong>PG Exams:</strong> ${pgExamsList}</p>
-                            </div>
                         </div>
                         ${websiteHtml}
                     </div>
@@ -350,7 +302,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 return checkExam(pgExams, examName);
             }
         });
-        // ---------------------------------------
 
         if (data.length === 0) {
           examList.innerHTML = '<p style="color:#ccc; text-align:center; grid-column: 1 / -1;">No institutions found accepting this exam.</p>';
