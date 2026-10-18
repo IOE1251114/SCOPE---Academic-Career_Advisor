@@ -69,24 +69,23 @@ app.get('/api/search', verifyToken, async (req, res) => {
     let results = [];
     let errorMsg = null;
 
-    const fetchTable = async (tableName, isUniv) => {
-        const ugTable = isUniv ? 'university_ug_exams' : 'college_ug_exams';
-        const pgTable = isUniv ? 'university_pg_exams' : 'college_pg_exams';
-        
-        // Fetch baseline table data along with the nested exam relations safely
+    const fetchTable = async (tableName) => {
+        // Fast query: Select columns from the main table without heavy multi-table joins causing timeouts
         let query = supabase
             .from(tableName)
-            .select(`*, ${ugTable}(*), ${pgTable}(*)`)
-            .limit(10000); 
+            .select('*')
+            .limit(1000); // Capped to prevent timeouts and payload overload
         
-        if (state) query = query.ilike('State', `%${state}%`);
+        if (state && state !== 'all') {
+            query = query.ilike('State', `%${state}%`);
+        }
         
-        if (tableName === 'universities' && univ_type) {
+        if (tableName === 'universities' && univ_type && univ_type !== 'all') {
             query = query.ilike('University_Type', `%${univ_type}%`);
         }
         if (tableName === 'colleges') {
-            if (univ_type) query = query.ilike('University_type', `%${univ_type}%`);
-            if (coll_type) query = query.ilike('College_type', `%${coll_type}%`);
+            if (univ_type && univ_type !== 'all') query = query.ilike('University_type', `%${univ_type}%`);
+            if (coll_type && coll_type !== 'all') query = query.ilike('College_type', `%${coll_type}%`);
         }
         
         const { data, error } = await query;
@@ -99,15 +98,15 @@ app.get('/api/search', verifyToken, async (req, res) => {
 
     try {
         if (level === 'university') {
-            results = await fetchTable('universities', true);
+            results = await fetchTable('universities');
             results = results.map(u => ({ ...u, entityType: 'University' }));
         } else if (level === 'college') {
-            results = await fetchTable('colleges', false);
+            results = await fetchTable('colleges');
             results = results.map(c => ({ ...c, entityType: 'College' }));
         } else {
             const [univs, colls] = await Promise.all([
-                fetchTable('universities', true),
-                fetchTable('colleges', false)
+                fetchTable('universities'),
+                fetchTable('colleges')
             ]);
             const taggedUnivs = univs.map(u => ({ ...u, entityType: 'University' }));
             const taggedColls = colls.map(c => ({ ...c, entityType: 'College' }));
