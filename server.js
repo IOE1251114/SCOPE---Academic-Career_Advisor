@@ -64,15 +64,26 @@ const verifyToken = async (req, res, next) => {
 
 // Search Route (Protected)
 app.get('/api/search', verifyToken, async (req, res) => {
-    const { level, state, location_type, univ_type, coll_type } = req.query;
+    // 1. ADDED: Destructure ug_exam and pg_exam from the request query
+    const { level, state, location_type, univ_type, coll_type, ug_exam, pg_exam } = req.query;
     
     let results = [];
     let errorMsg = null;
 
-    const fetchTable = async (tableName) => {
-        let query = supabase.from(tableName).select('*').limit(10000); 
+    const fetchTable = async (tableName, isUniv) => {
+        // 2. ADDED: Determine which child tables to join based on entity type
+        const ugTable = isUniv ? 'university_ug_exams' : 'college_ug_exams';
+        const pgTable = isUniv ? 'university_pg_exams' : 'college_pg_exams';
         
-        // Using ilike to bypass strict whitespace/casing mismatches in the DB
+        // Use '!inner' to filter the parent table if an exam is searched, otherwise do a normal join
+        const ugSelect = ug_exam ? `${ugTable}!inner(*)` : `${ugTable}(*)`;
+        const pgSelect = pg_exam ? `${pgTable}!inner(*)` : `${pgTable}(*)`;
+
+        let query = supabase
+            .from(tableName)
+            .select(`*, ${ugSelect}, ${pgSelect}`)
+            .limit(10000); 
+        
         if (state) query = query.ilike('State', `%${state}%`);
         if (location_type) query = query.ilike('Location_type', `%${location_type}%`);
         
@@ -84,20 +95,29 @@ app.get('/api/search', verifyToken, async (req, res) => {
             if (coll_type) query = query.ilike('College_type', `%${coll_type}%`);
         }
         
+        // 3. ADDED: Apply the exam filters to the joined tables (assuming column name is 'Exam')
+        if (ug_exam) query = query.ilike(`${ugTable}.Exam`, `%${ug_exam}%`);
+        if (pg_exam) query = query.ilike(`${pgTable}.Exam`, `%${pg_exam}%`);
+        
         const { data, error } = await query;
-        if (error) errorMsg = error.message;
+        if (error) {
+            console.error("Supabase Error:", error);
+            errorMsg = error.message;
+        }
         return data || [];
     };
 
     try {
         if (level === 'university') {
-            results = await fetchTable('universities');
+            results = await fetchTable('universities', true);
+            results = results.map(u => ({ ...u, entityType: 'University' }));
         } else if (level === 'college') {
-            results = await fetchTable('colleges');
+            results = await fetchTable('colleges', false);
+            results = results.map(c => ({ ...c, entityType: 'College' }));
         } else {
             const [univs, colls] = await Promise.all([
-                fetchTable('universities'),
-                fetchTable('colleges')
+                fetchTable('universities', true),
+                fetchTable('colleges', false)
             ]);
             const taggedUnivs = univs.map(u => ({ ...u, entityType: 'University' }));
             const taggedColls = colls.map(c => ({ ...c, entityType: 'College' }));
@@ -111,6 +131,7 @@ app.get('/api/search', verifyToken, async (req, res) => {
         res.status(500).json({ error: 'Server error processing search' });
     }
 });
+
 
 if (process.env.NODE_ENV !== 'production') {
     app.listen(3000, () => console.log('Scope backend running on port 3000'));
