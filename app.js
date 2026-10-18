@@ -55,6 +55,12 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         if (!response.ok) {
+          if (response.status === 401 || response.status === 403) {
+            localStorage.removeItem("scope_token"); 
+            alert("Your session has expired. Please sign in again.");
+            window.location.href = "login.html"; 
+            return;
+          }
           throw new Error(result.error || "Authentication failed");
         }
 
@@ -115,11 +121,11 @@ document.addEventListener("DOMContentLoaded", () => {
       const params = new URLSearchParams();
       if (level !== "all") params.append("level", level);
       if (state !== "all") params.append("state", state);
-      if (location !== "all") params.append("location_type", location);
       if (univType !== "all") params.append("univ_type", univType);
       if (collType !== "all" && level !== "university") params.append("coll_type", collType);
-      if (ugExam) params.append("ug_exam", ugExam);
-      if (pgExam) params.append("pg_exam", pgExam);
+      
+      // Note: location_type, ug_exam, and pg_exam are deliberately omitted from params 
+      // to prevent backend SQL column errors. They are filtered client-side below.
 
       list.innerHTML = '<p style="color:#00E5FF; text-align:center; grid-column: 1 / -1;">Loading institutions...</p>';
 
@@ -145,6 +151,33 @@ document.addEventListener("DOMContentLoaded", () => {
           }
           throw new Error(data.error || "Failed to fetch");
         }
+
+        // --- CLIENT SIDE FILTERING (Bypasses Backend Column Errors) ---
+        if (location !== "all") {
+            data = data.filter(item => item.Location_type && item.Location_type.toLowerCase().includes(location.toLowerCase()));
+        }
+
+        if (ugExam || pgExam) {
+            data = data.filter(item => {
+                const isUniv = item.entityType === "University" || !item.College_type;
+                const ugExams = isUniv ? item.university_ug_exams : item.college_ug_exams;
+                const pgExams = isUniv ? item.university_pg_exams : item.college_pg_exams;
+                
+                const checkExam = (arr, search) => {
+                    if (!arr) return false;
+                    return arr.some(obj => {
+                        const keys = Object.keys(obj).filter(k => !k.includes('CODE') && !k.includes('id'));
+                        return keys.some(k => obj[k] && obj[k].toString().toLowerCase().includes(search.toLowerCase()));
+                    });
+                };
+
+                let pass = true;
+                if (ugExam && !checkExam(ugExams, ugExam)) pass = false;
+                if (pgExam && !checkExam(pgExams, pgExam)) pass = false;
+                return pass;
+            });
+        }
+        // --------------------------------------------------------------
 
         if (data.length === 0) {
           list.innerHTML = '<p style="color:#ccc; text-align:center; grid-column: 1 / -1;">No institutions match your filters.</p>';
@@ -256,8 +289,8 @@ document.addEventListener("DOMContentLoaded", () => {
       if (instLevel !== "all") params.append("level", instLevel);
       if (state !== "all") params.append("state", state);
       
-      if (examCategory === "ug" || examCategory === "both") params.append("ug_exam", examName);
-      if (examCategory === "pg" || examCategory === "both") params.append("pg_exam", examName);
+      // Note: ug_exam and pg_exam are deliberately omitted from params 
+      // to prevent backend SQL column errors. They are filtered client-side below.
 
       examList.innerHTML = '<p style="color:#00E5FF; text-align:center; grid-column: 1 / -1;">Searching for institutions...</p>';
 
@@ -266,7 +299,7 @@ document.addEventListener("DOMContentLoaded", () => {
           headers: { Authorization: `Bearer ${token}` },
         });
 
-        const data = await response.json();
+        let data = await response.json();
         
         if (!response.ok) {
           if (response.status === 401 || response.status === 403) {
@@ -277,6 +310,30 @@ document.addEventListener("DOMContentLoaded", () => {
           }
           throw new Error(data.error || "Failed to fetch");
         }
+
+        // --- CLIENT SIDE FILTERING FOR EXAMS ---
+        data = data.filter(item => {
+            const isUniv = item.entityType === "University" || !item.College_type;
+            const ugExams = isUniv ? item.university_ug_exams : item.college_ug_exams;
+            const pgExams = isUniv ? item.university_pg_exams : item.college_pg_exams;
+            
+            const checkExam = (arr, search) => {
+                if (!arr) return false;
+                return arr.some(obj => {
+                    const keys = Object.keys(obj).filter(k => !k.includes('CODE') && !k.includes('id'));
+                    return keys.some(k => obj[k] && obj[k].toString().toLowerCase().includes(search.toLowerCase()));
+                });
+            };
+
+            if (examCategory === "both") {
+                return checkExam(ugExams, examName) || checkExam(pgExams, examName);
+            } else if (examCategory === "ug") {
+                return checkExam(ugExams, examName);
+            } else {
+                return checkExam(pgExams, examName);
+            }
+        });
+        // ---------------------------------------
 
         if (data.length === 0) {
           examList.innerHTML = '<p style="color:#ccc; text-align:center; grid-column: 1 / -1;">No institutions found accepting this exam.</p>';
