@@ -118,14 +118,10 @@ document.addEventListener("DOMContentLoaded", () => {
       const ugExam = ugExamFilter ? ugExamFilter.value.trim() : "";
       const pgExam = pgExamFilter ? pgExamFilter.value.trim() : "";
 
+      // ONLY append safe columns to the backend request
       const params = new URLSearchParams();
       if (level !== "all") params.append("level", level);
       if (state !== "all") params.append("state", state);
-      if (univType !== "all") params.append("univ_type", univType);
-      if (collType !== "all" && level !== "university") params.append("coll_type", collType);
-      
-      // Note: location_type, ug_exam, and pg_exam are deliberately omitted from params 
-      // to prevent backend SQL column errors. They are filtered client-side below.
 
       list.innerHTML = '<p style="color:#00E5FF; text-align:center; grid-column: 1 / -1;">Loading institutions...</p>';
 
@@ -153,10 +149,33 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         // --- CLIENT SIDE FILTERING (Bypasses Backend Column Errors) ---
-        if (location !== "all") {
-            data = data.filter(item => item.Location_type && item.Location_type.toLowerCase().includes(location.toLowerCase()));
+        
+        // 1. Filter by University Type (Forgiving Match)
+        if (univType !== "all") {
+            data = data.filter(item => {
+                const uType = item.University_Type || item.University_type || item.university_type || "";
+                return uType.toLowerCase().includes(univType.split(' ')[0].toLowerCase());
+            });
         }
 
+        // 2. Filter by College Type
+        if (collType !== "all" && level !== "university") {
+            data = data.filter(item => {
+                if (item.entityType === "University") return true; // Keep universities if viewing both
+                const cType = item.College_type || item.college_type || "";
+                return cType.toLowerCase().includes(collType.toLowerCase());
+            });
+        }
+
+        // 3. Filter by Location
+        if (location !== "all") {
+            data = data.filter(item => {
+                const loc = item.Location_type || item.location_type || item.Location || "";
+                return loc.toLowerCase().includes(location.toLowerCase());
+            });
+        }
+
+        // 4. Filter by Exams
         if (ugExam || pgExam) {
             data = data.filter(item => {
                 const isUniv = item.entityType === "University" || !item.College_type;
@@ -200,7 +219,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
             const name = item.Name || item.University_name || "Unknown Institution";
             const estYear = item.Established_year || item.Establishment_year || "N/A";
-            const instType = isUniversity ? item.University_Type : item.College_type;
+            const instType = isUniversity ? item.University_Type || item.University_type : item.College_type || item.college_type;
+            const loc = item.Location_type || item.location_type || item.Location || "N/A";
             
             const ugExamsList = isUniversity ? extractExams(item.university_ug_exams) : extractExams(item.college_ug_exams);
             const pgExamsList = isUniversity ? extractExams(item.university_pg_exams) : extractExams(item.college_pg_exams);
@@ -218,7 +238,7 @@ document.addEventListener("DOMContentLoaded", () => {
                             ${!isUniversity && item.University_name ? `<p><strong>Affiliated To:</strong> ${item.University_name}</p>` : ""}
                             <p><strong>Established:</strong> ${estYear}</p>
                             <p><strong>Type:</strong> ${instType || "N/A"}</p>
-                            <p><strong>Location:</strong> ${item.Location_type || "N/A"}, ${item.State || "N/A"}</p>
+                            <p><strong>Location:</strong> ${loc}, ${item.State || "N/A"}</p>
                             <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 5px;">
                                 <p style="color: #00E5FF; margin-bottom: 3px;"><strong>UG Exams:</strong> ${ugExamsList}</p>
                                 <p style="color: #00E5FF;"><strong>PG Exams:</strong> ${pgExamsList}</p>
@@ -289,9 +309,6 @@ document.addEventListener("DOMContentLoaded", () => {
       if (instLevel !== "all") params.append("level", instLevel);
       if (state !== "all") params.append("state", state);
       
-      // Note: ug_exam and pg_exam are deliberately omitted from params 
-      // to prevent backend SQL column errors. They are filtered client-side below.
-
       examList.innerHTML = '<p style="color:#00E5FF; text-align:center; grid-column: 1 / -1;">Searching for institutions...</p>';
 
       try {
