@@ -117,6 +117,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const params = new URLSearchParams();
       if (level !== "all") params.append("level", level);
       if (state !== "all") params.append("state", state);
+      if (location !== "all") params.append("location_type", location);
+      if (univType !== "all") params.append("univ_type", univType);
+      if (collType !== "all" && level !== "university") params.append("coll_type", collType);
 
       list.innerHTML = '<p style="color:#00E5FF; text-align:center; grid-column: 1 / -1;">Loading institutions...</p>';
 
@@ -161,7 +164,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (location !== "all") {
             data = data.filter(item => {
-                const loc = item.Location_type || item.location_type || item.Location || "";
+                const loc = item.Location_Type || item.location_type || item.Location || "";
                 return loc.toLowerCase().includes(location.toLowerCase());
             });
         }
@@ -177,9 +180,13 @@ document.addEventListener("DOMContentLoaded", () => {
             const badgeClass = isUniversity ? "badge-univ" : "badge-coll";
 
             const name = item.Name || item.University_name || "Unknown Institution";
-            const estYear = item.Established_year || item.Establishment_year || "N/A";
+            
+            // Explicitly mapped to exact Supabase casing: Establishment_Year
+            const estYear = item.Establishment_Year || item.Established_year || item.establishment_year || "N/A";
             const instType = isUniversity ? item.University_Type || item.University_type : item.College_type || item.college_type;
-            const loc = item.Location_type || item.location_type || item.Location || "N/A";
+            
+            // Explicitly mapped to exact Supabase casing: Location_Type
+            const loc = item.Location_Type || item.location_type || item.Location || "N/A";
 
             const siteUrl = item.Website && item.Website !== "-" ? item.Website : null;
             const websiteHtml = siteUrl
