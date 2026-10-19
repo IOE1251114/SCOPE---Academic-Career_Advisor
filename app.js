@@ -260,6 +260,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const params = new URLSearchParams();
       if (instLevel !== "all") params.append("level", instLevel);
       if (state !== "all") params.append("state", state);
+      params.append("include_exams", "true"); // Instructs the backend to join the relational tables
       
       examList.innerHTML = '<p style="color:#00E5FF; text-align:center; grid-column: 1 / -1;">Searching for institutions...</p>';
 
