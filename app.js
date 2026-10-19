@@ -2,6 +2,105 @@
 
 const API_URL = "/api";
 
+// ==========================================
+// HELPERS
+// ==========================================
+const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, "");
+
+// Escape database text before putting it into innerHTML
+const esc = (v) =>
+  String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+// Case/underscore-insensitive field lookup: getField(row, "Location_Type")
+// also finds "location_type", "Location_type", "LocationType", ...
+const getField = (item, ...names) => {
+  const keys = Object.keys(item);
+  for (const name of names) {
+    const key = keys.find((k) => norm(k) === norm(name));
+    if (key !== undefined && item[key] !== null && item[key] !== "") return item[key];
+  }
+  return null;
+};
+
+// Safety-net filter: if the row has no such field we can't judge it, so keep it
+const matches = (item, names, value) => {
+  const v = getField(item, ...names);
+  return v === null || String(v).toLowerCase().includes(value.toLowerCase());
+};
+
+const safeUrl = (u) => {
+  const url = String(u).trim();
+  if (/^https?:\/\//i.test(url)) return url;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return null; // blocks javascript:, data:, ...
+  return "https://" + url;
+};
+
+const websiteHtml = (item) => {
+  const raw = getField(item, "Website");
+  const url = raw && raw !== "-" ? safeUrl(raw) : null;
+  return url
+    ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer" class="website-link">Visit Website</a>`
+    : `<span class="no-website">No website available</span>`;
+};
+
+// PostgREST returns an array for one-to-many joins but a single object for one-to-one
+const toArray = (v) => (Array.isArray(v) ? v : v ? [v] : []);
+
+const META_KEY = /(^id$|_id$|^id_|code|created|updated)/i;
+const examLabel = (obj) => {
+  const entries = Object.entries(obj).filter(
+    ([k, v]) => !META_KEY.test(k) && v !== null && v !== "" && typeof v !== "object"
+  );
+  const preferred = entries.find(([k]) => /exam/i.test(k)) || entries[0];
+  return preferred ? String(preferred[1]) : null;
+};
+const examList = (rows) => {
+  const labels = [...new Set(toArray(rows).map(examLabel).filter(Boolean))];
+  return labels.length ? labels.join(", ") : "Not Specified";
+};
+
+// fetch + safe JSON parsing with a useful error message
+async function apiRequest(path, options = {}) {
+  let response;
+  try {
+    response = await fetch(`${API_URL}${path}`, options);
+  } catch (e) {
+    throw new Error("Cannot reach the server. Check your connection or that the backend is running.");
+  }
+  const text = await response.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    console.error(`Non-JSON response from ${path} (HTTP ${response.status}):`, text.slice(0, 300));
+    throw new Error(`The API returned an unexpected response (HTTP ${response.status}). The backend may not be deployed correctly.`);
+  }
+  return { response, data };
+}
+
+function handleExpiredSession() {
+  localStorage.removeItem("scope_token");
+  alert("Your session has expired. Please sign in again.");
+  window.location.href = "login.html";
+}
+
+// Authenticated GET /api/search. Returns null if the session expired (already redirected).
+async function authedSearch(params) {
+  const token = localStorage.getItem("scope_token");
+  const { response, data } = await apiRequest(`/search?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      handleExpiredSession();
+      return null;
+    }
+    throw new Error(data.error || "Failed to fetch data");
+  }
+  if (!Array.isArray(data)) throw new Error("Unexpected data format received from server.");
+  return data;
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   // ==========================================
   // 1. LANDING PAGE LOGIC (index.html)
@@ -35,41 +134,20 @@ document.addEventListener("DOMContentLoaded", () => {
       }
 
       try {
-        const response = await fetch(`${API_URL}${endpoint}`, {
+        const { response, data } = await apiRequest(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            email: emailInput.value,
-            password: passwordInput.value,
-          }),
+          body: JSON.stringify({ email: emailInput.value, password: passwordInput.value }),
         });
 
-        const text = await response.text(); 
-        let result;
-        
-        try {
-          result = JSON.parse(text);
-        } catch (e) {
-          console.error("Server returned non-JSON response:", text);
-          throw new Error("Server error: Received an invalid response format.");
-        }
-
-        if (!response.ok) {
-          if (response.status === 401 || response.status === 403) {
-            localStorage.removeItem("scope_token"); 
-            alert("Your session has expired. Please sign in again.");
-            window.location.href = "login.html"; 
-            return;
-          }
-          throw new Error(result.error || "Authentication failed");
-        }
+        if (!response.ok) throw new Error(data.error || "Authentication failed");
 
         if (endpoint === "/login") {
-          localStorage.setItem("scope_token", result.token);
+          localStorage.setItem("scope_token", data.token);
           window.location.href = "college.html";
         } else {
           authError.style.color = "#00E5FF";
-          authError.textContent = result.message || "Sign up successful! Please Sign In.";
+          authError.textContent = data.message || "Sign up successful! Please Sign In.";
         }
       } catch (error) {
         authError.style.color = "#ff4444";
@@ -87,8 +165,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const applyFiltersBtn = document.getElementById("apply-filters-btn");
 
   if (applyFiltersBtn) {
-    const token = localStorage.getItem("scope_token");
-    if (!token) {
+    if (!localStorage.getItem("scope_token")) {
       alert("Please sign in to access the database.");
       window.location.href = "login.html";
       return;
@@ -124,49 +201,14 @@ document.addEventListener("DOMContentLoaded", () => {
       list.innerHTML = '<p style="color:#00E5FF; text-align:center; grid-column: 1 / -1;">Loading institutions...</p>';
 
       try {
-        const response = await fetch(`${API_URL}/search?${params.toString()}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        let data = await authedSearch(params);
+        if (!data) return;
 
-        const text = await response.text();
-        let data;
-        try {
-          data = JSON.parse(text);
-        } catch (e) {
-          throw new Error("Failed to parse search results from server.");
-        }
-
-        if (!response.ok) {
-          if (response.status === 401 || response.status === 403) {
-            localStorage.removeItem("scope_token"); 
-            alert("Your session has expired. Please sign in again.");
-            window.location.href = "login.html"; 
-            return;
-          }
-          throw new Error(data.error || "Failed to fetch");
-        }
-
-        // --- CLIENT SIDE FILTERING ---
-        if (univType !== "all") {
-            data = data.filter(item => {
-                const uType = item.University_Type || item.University_type || item.university_type || "";
-                return uType.toLowerCase().includes(univType.split(' ')[0].toLowerCase());
-            });
-        }
-
+        // Safety-net filtering (server already filters; this only trims anything it couldn't)
+        if (univType !== "all") data = data.filter((i) => matches(i, ["University_Type"], univType));
+        if (location !== "all") data = data.filter((i) => matches(i, ["Location_Type", "Location"], location));
         if (collType !== "all" && level !== "university") {
-            data = data.filter(item => {
-                if (item.entityType === "University") return true; 
-                const cType = item.College_type || item.college_type || "";
-                return cType.toLowerCase().includes(collType.toLowerCase());
-            });
-        }
-
-        if (location !== "all") {
-            data = data.filter(item => {
-                const loc = item.Location_Type || item.location_type || item.Location || "";
-                return loc.toLowerCase().includes(location.toLowerCase());
-            });
+          data = data.filter((i) => i.entityType === "University" || matches(i, ["College_Type"], collType));
         }
 
         if (data.length === 0) {
@@ -174,42 +216,36 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
 
-        list.innerHTML = data.map((item) => {
-            const isUniversity = item.entityType === "University" || !item.College_type;
+        list.innerHTML = data
+          .map((item) => {
+            const isUniversity = item.entityType === "University";
             const badgeLabel = isUniversity ? "University" : "College";
             const badgeClass = isUniversity ? "badge-univ" : "badge-coll";
 
-            const name = item.Name || item.University_name || "Unknown Institution";
-            
-            // Explicitly mapped to exact Supabase casing: Establishment_Year
-            const estYear = item.Establishment_Year || item.Established_year || item.establishment_year || "N/A";
-            const instType = isUniversity ? item.University_Type || item.University_type : item.College_type || item.college_type;
-            
-            // Explicitly mapped to exact Supabase casing: Location_Type
-            const loc = item.Location_Type || item.location_type || item.Location || "N/A";
-
-            const siteUrl = item.Website && item.Website !== "-" ? item.Website : null;
-            const websiteHtml = siteUrl
-              ? `<a href="${siteUrl.startsWith("http") ? siteUrl : "https://" + siteUrl}" target="_blank" class="website-link">Visit Website</a>`
-              : `<span class="no-website">No website available</span>`;
+            const name = getField(item, "Name", "University_name") || "Unknown Institution";
+            const estYear = getField(item, "Establishment_Year", "Established_year") || "N/A";
+            const instType = getField(item, isUniversity ? "University_Type" : "College_Type") || "N/A";
+            const loc = getField(item, "Location_Type", "Location") || "N/A";
+            const state = getField(item, "State") || "N/A";
+            const affiliated = !isUniversity ? getField(item, "University_name") : null;
 
             return `
-                    <div class="college-card">
-                        <span class="badge ${badgeClass}">${badgeLabel}</span>
-                        <h3>${name}</h3>
-                        <div class="card-details">
-                            ${!isUniversity && item.University_name ? `<p><strong>Affiliated To:</strong> ${item.University_name}</p>` : ""}
-                            <p><strong>Established:</strong> ${estYear}</p>
-                            <p><strong>Type:</strong> ${instType || "N/A"}</p>
-                            <p><strong>Location:</strong> ${loc}, ${item.State || "N/A"}</p>
-                        </div>
-                        ${websiteHtml}
-                    </div>
-                    `;
-          }).join("");
+              <div class="college-card">
+                <span class="badge ${badgeClass}">${badgeLabel}</span>
+                <h3>${esc(name)}</h3>
+                <div class="card-details">
+                  ${affiliated ? `<p><strong>Affiliated To:</strong> ${esc(affiliated)}</p>` : ""}
+                  <p><strong>Established:</strong> ${esc(estYear)}</p>
+                  <p><strong>Type:</strong> ${esc(instType)}</p>
+                  <p><strong>Location:</strong> ${esc(loc)}, ${esc(state)}</p>
+                </div>
+                ${websiteHtml(item)}
+              </div>`;
+          })
+          .join("");
       } catch (error) {
         console.error("Search error:", error);
-        list.innerHTML = `<p style="color:#ff4444; text-align:center; grid-column: 1 / -1;">Error: ${error.message}</p>`;
+        list.innerHTML = `<p style="color:#ff4444; text-align:center; grid-column: 1 / -1;">Error: ${esc(error.message)}</p>`;
       }
     };
 
@@ -221,7 +257,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // 4. THEME TOGGLE LOGIC
   // ==========================================
   const themeToggleBtn = document.getElementById("theme-toggle");
-  
+
   if (localStorage.getItem("scope_theme") === "inverted") {
     document.body.classList.add("invert-theme");
   }
@@ -229,12 +265,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (themeToggleBtn) {
     themeToggleBtn.addEventListener("click", () => {
       document.body.classList.toggle("invert-theme");
-      
-      if (document.body.classList.contains("invert-theme")) {
-        localStorage.setItem("scope_theme", "inverted");
-      } else {
-        localStorage.setItem("scope_theme", "normal");
-      }
+      localStorage.setItem("scope_theme", document.body.classList.contains("invert-theme") ? "inverted" : "normal");
     });
   }
 
@@ -244,116 +275,75 @@ document.addEventListener("DOMContentLoaded", () => {
   const applyExamFiltersBtn = document.getElementById("apply-exam-filters-btn");
 
   if (applyExamFiltersBtn) {
-    const token = localStorage.getItem("scope_token");
-    if (!token) {
+    if (!localStorage.getItem("scope_token")) {
       alert("Please sign in to access the database.");
       window.location.href = "login.html";
       return;
     }
 
-    const examList = document.getElementById("exam-results-list");
+    const examListEl = document.getElementById("exam-results-list");
+    const examInput = document.getElementById("exam-search-input");
 
     const fetchExamData = async () => {
-      const examName = document.getElementById("exam-search-input").value.trim();
+      const examName = examInput.value.trim();
       const examCategory = document.getElementById("exam-category-filter").value;
       const instLevel = document.getElementById("exam-inst-level").value;
       const state = document.getElementById("exam-state-filter").value;
 
       if (!examName) {
-        examList.innerHTML = '<p style="color:#ff4444; text-align:center; grid-column: 1 / -1;">Please enter an exam name to search.</p>';
+        examListEl.innerHTML = '<p style="color:#ff4444; text-align:center; grid-column: 1 / -1;">Please enter an exam name to search.</p>';
         return;
       }
 
       const params = new URLSearchParams();
       if (instLevel !== "all") params.append("level", instLevel);
       if (state !== "all") params.append("state", state);
-      params.append("include_exams", "true"); // Instructs the backend to join the relational tables
-      
-      examList.innerHTML = '<p style="color:#00E5FF; text-align:center; grid-column: 1 / -1;">Searching for institutions...</p>';
+      params.append("include_exams", "true"); // server joins the exam tables...
+      params.append("exam", examName); //        ...and filters on this term
+      params.append("exam_category", examCategory);
+
+      examListEl.innerHTML = '<p style="color:#00E5FF; text-align:center; grid-column: 1 / -1;">Searching for institutions...</p>';
 
       try {
-        const response = await fetch(`${API_URL}/search?${params.toString()}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        let data = await response.json();
-        
-        if (!response.ok) {
-          if (response.status === 401 || response.status === 403) {
-            localStorage.removeItem("scope_token"); 
-            alert("Your session has expired. Please sign in again.");
-            window.location.href = "login.html";
-            return;
-          }
-          throw new Error(data.error || "Failed to fetch");
-        }
-
-        // --- CLIENT SIDE FILTERING FOR EXAMS ---
-        data = data.filter(item => {
-            const isUniv = item.entityType === "University" || !item.College_type;
-            const ugExams = isUniv ? item.university_ug_exams : item.college_ug_exams;
-            const pgExams = isUniv ? item.university_pg_exams : item.college_pg_exams;
-            
-            const checkExam = (arr, search) => {
-                if (!arr) return false;
-                return arr.some(obj => {
-                    const keys = Object.keys(obj).filter(k => !k.includes('CODE') && !k.includes('id'));
-                    return keys.some(k => obj[k] && obj[k].toString().toLowerCase().includes(search.toLowerCase()));
-                });
-            };
-
-            if (examCategory === "both") {
-                return checkExam(ugExams, examName) || checkExam(pgExams, examName);
-            } else if (examCategory === "ug") {
-                return checkExam(ugExams, examName);
-            } else {
-                return checkExam(pgExams, examName);
-            }
-        });
+        const data = await authedSearch(params);
+        if (!data) return;
 
         if (data.length === 0) {
-          examList.innerHTML = '<p style="color:#ccc; text-align:center; grid-column: 1 / -1;">No institutions found accepting this exam.</p>';
+          examListEl.innerHTML = '<p style="color:#ccc; text-align:center; grid-column: 1 / -1;">No institutions found accepting this exam.</p>';
           return;
         }
 
-        const extractExams = (examArray) => {
-            if (!examArray || examArray.length === 0) return "Not Specified";
-            return examArray.map(obj => {
-                const keys = Object.keys(obj).filter(k => !k.includes('CODE') && !k.includes('id'));
-                return obj[keys[0]]; 
-            }).filter(Boolean).join(", ") || "Not Specified";
-        };
-
-        examList.innerHTML = data.map((item) => {
-            const isUniv = item.entityType === "University" || !item.College_type;
-            const ugExamsList = extractExams(isUniv ? item.university_ug_exams : item.college_ug_exams);
-            const pgExamsList = extractExams(isUniv ? item.university_pg_exams : item.college_pg_exams);
-            
-            const siteUrl = item.Website && item.Website !== "-" ? item.Website : null;
-            const websiteHtml = siteUrl
-              ? `<a href="${siteUrl.startsWith("http") ? siteUrl : "https://" + siteUrl}" target="_blank" class="website-link">Visit Website</a>`
-              : `<span class="no-website">No website available</span>`;
+        examListEl.innerHTML = data
+          .map((item) => {
+            const isUniv = item.entityType === "University";
+            const ugExams = examList(isUniv ? item.university_ug_exams : item.college_ug_exams);
+            const pgExams = examList(isUniv ? item.university_pg_exams : item.college_pg_exams);
+            const name = getField(item, "Name", "University_name") || "Unknown Institution";
 
             return `
-                <div class="college-card">
-                    <span class="badge ${isUniv ? 'badge-univ' : 'badge-coll'}">${isUniv ? 'University' : 'College'}</span>
-                    <h3>${item.Name || item.University_name}</h3>
-                    <div class="card-details">
-                        <p><strong>State:</strong> ${item.State}</p>
-                        <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 5px;">
-                            <p style="color: #00E5FF; margin-bottom: 3px;"><strong>UG Exams:</strong> ${ugExamsList}</p>
-                            <p style="color: #00E5FF;"><strong>PG Exams:</strong> ${pgExamsList}</p>
-                        </div>
-                    </div>
-                    ${websiteHtml}
+              <div class="college-card">
+                <span class="badge ${isUniv ? "badge-univ" : "badge-coll"}">${isUniv ? "University" : "College"}</span>
+                <h3>${esc(name)}</h3>
+                <div class="card-details">
+                  <p><strong>State:</strong> ${esc(getField(item, "State") || "N/A")}</p>
+                  <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 5px;">
+                    <p style="color: #00E5FF; margin-bottom: 3px;"><strong>UG Exams:</strong> ${esc(ugExams)}</p>
+                    <p style="color: #00E5FF;"><strong>PG Exams:</strong> ${esc(pgExams)}</p>
+                  </div>
                 </div>
-            `;
-        }).join("");
+                ${websiteHtml(item)}
+              </div>`;
+          })
+          .join("");
       } catch (error) {
-        examList.innerHTML = `<p style="color:#ff4444; text-align:center; grid-column: 1 / -1;">Error: ${error.message}</p>`;
+        console.error("Exam search error:", error);
+        examListEl.innerHTML = `<p style="color:#ff4444; text-align:center; grid-column: 1 / -1;">Error: ${esc(error.message)}</p>`;
       }
     };
 
     applyExamFiltersBtn.addEventListener("click", fetchExamData);
+    examInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") fetchExamData();
+    });
   }
 });
