@@ -265,16 +265,68 @@
             <h2>Find by Exam</h2>
             
             <div class="filter-group">
-                <label>Search Exam Name</label>
-                <input type="text" id="exam-search-input" placeholder="e.g. JEE, NEET, CUET, GATE">
-            </div>
-
-            <div class="filter-group">
-                <label>Exam Category</label>
-                <select id="exam-category-filter">
-                    <option value="both">Both UG & PG Exams</option>
-                    <option value="ug">Undergraduate (UG) Only</option>
-                    <option value="pg">Postgraduate (PG) Only</option>
+                <label>Select Exam</label>
+                <select id="exam-search-input">
+                    <option value="">-- Choose an exam --</option>
+                    <optgroup label="Undergraduate (UG)">
+                        <option value="JEE Main" data-cat="ug">JEE Main (B.E. / B.Tech)</option>
+                        <option value="JEE Advanced" data-cat="ug">JEE Advanced (IITs)</option>
+                        <option value="NEET UG" data-cat="ug">NEET UG (MBBS / BDS / AYUSH)</option>
+                        <option value="CUET UG" data-cat="ug">CUET UG</option>
+                        <option value="CLAT" data-cat="ug">CLAT (LLB)</option>
+                        <option value="NCET" data-cat="ug">NCET (ITEP)</option>
+                        <option value="NATA" data-cat="ug">NATA (B.Arch)</option>
+                        <option value="BITSAT" data-cat="ug">BITSAT</option>
+                        <option value="VITEEE" data-cat="ug">VITEEE</option>
+                        <option value="IPMAT" data-cat="ug">IPMAT</option>
+                        <option value="NIFT" data-cat="ug">NIFT</option>
+                        <option value="MHT CET" data-cat="ug">MHT CET</option>
+                        <option value="KCET" data-cat="ug">KCET</option>
+                        <option value="EAPCET" data-cat="ug">AP / TS EAPCET</option>
+                        <option value="WBJEE" data-cat="ug">WBJEE</option>
+                        <option value="OJEE" data-cat="ug">OJEE</option>
+                        <option value="GUJCET" data-cat="ug">GUJCET</option>
+                        <option value="KEAM" data-cat="ug">KEAM</option>
+                        <option value="COMEDK" data-cat="ug">COMEDK</option>
+                        <option value="BCECE" data-cat="ug">BCECE</option>
+                        <option value="ICAR" data-cat="ug">ICAR AIEEA UG (Agriculture)</option>
+                        <option value="D.El.Ed" data-cat="ug">D.El.Ed</option>
+                        <option value="GNM" data-cat="ug">GNM / ANM (Nursing)</option>
+                        <option value="B.Sc Nursing" data-cat="ug">B.Sc Nursing</option>
+                        <option value="D.Pharm" data-cat="ug">D.Pharm</option>
+                        <option value="B.Pharm" data-cat="ug">B.Pharm</option>
+                        <option value="NCHM" data-cat="ug">NCHM JEE (Hotel Management)</option>
+                        <option value="Class 12 merit" data-cat="ug">Class 12 merit (no entrance)</option>
+                        <option value="own entrance" data-cat="ug">University's own entrance test</option>
+                    </optgroup>
+                    <optgroup label="Postgraduate (PG)">
+                        <option value="GATE" data-cat="pg">GATE (M.Tech)</option>
+                        <option value="CAT" data-cat="pg">CAT (MBA)</option>
+                        <option value="MAT" data-cat="pg">MAT (MBA)</option>
+                        <option value="CMAT" data-cat="pg">CMAT (MBA)</option>
+                        <option value="XAT" data-cat="pg">XAT (MBA)</option>
+                        <option value="SNAP" data-cat="pg">SNAP (MBA)</option>
+                        <option value="GMAT" data-cat="pg">GMAT</option>
+                        <option value="NEET PG" data-cat="pg">NEET PG (MD / MS)</option>
+                        <option value="CUET PG" data-cat="pg">CUET PG</option>
+                        <option value="CLAT PG" data-cat="pg">CLAT PG (LLM)</option>
+                        <option value="GPAT" data-cat="pg">GPAT (M.Pharm)</option>
+                        <option value="AIAPGET" data-cat="pg">AIAPGET (AYUSH PG)</option>
+                        <option value="ICAR" data-cat="pg">ICAR AIEEA PG</option>
+                        <option value="UGC NET" data-cat="pg">UGC NET</option>
+                        <option value="CSIR" data-cat="pg">CSIR NET</option>
+                        <option value="JAM" data-cat="pg">IIT JAM</option>
+                        <option value="NIMCET" data-cat="pg">NIMCET (MCA)</option>
+                        <option value="MCA" data-cat="pg">MCA entrance</option>
+                        <option value="M.Ed" data-cat="pg">M.Ed</option>
+                        <option value="LLM" data-cat="pg">LLM</option>
+                        <option value="TANCET" data-cat="pg">TANCET</option>
+                        <option value="PGCET" data-cat="pg">PGCET</option>
+                        <option value="MAH" data-cat="pg">MAH CET (MBA / MMS)</option>
+                        <option value="CEED" data-cat="pg">CEED (Design)</option>
+                        <option value="Degree merit" data-cat="pg">Degree merit (MA / M.Sc / M.Com)</option>
+                        <option value="own entrance" data-cat="pg">University's own entrance test</option>
+                    </optgroup>
                 </select>
             </div>
 

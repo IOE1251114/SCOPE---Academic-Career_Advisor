@@ -165,13 +165,55 @@ document.addEventListener("DOMContentLoaded", () => {
     const levelFilter = document.getElementById("level-filter");
     const collTypeFilter = document.getElementById("coll-type-filter");
 
+    const stateFilter = document.getElementById("state-filter");
+    const districtFilter = document.getElementById("district-filter");
+    const managementFilter = document.getElementById("management-filter");
+    const univTypeFilter = document.getElementById("univ-type-filter");
+    const nameSearch = document.getElementById("name-search");
+    const sortFilter = document.getElementById("sort-filter");
+
+    // College-only filters hide for "Universities only"; university-only filter hides for "Colleges only"
     levelFilter.addEventListener("change", (e) => {
-      if (e.target.value === "university") {
-        collTypeFilter.parentElement.style.display = "none";
-        collTypeFilter.value = "all";
-      } else {
-        collTypeFilter.parentElement.style.display = "flex";
+      const lvl = e.target.value;
+      const toggle = (el, show) => {
+        el.parentElement.style.display = show ? "flex" : "none";
+        if (!show) el.value = "all";
+      };
+      toggle(collTypeFilter, lvl !== "university");
+      toggle(managementFilter, lvl !== "university");
+      toggle(univTypeFilter, lvl !== "college");
+    });
+
+    // District list for the chosen state (static file generated from the database)
+    let filterData = null;
+    const loadFilterData = async () => {
+      if (filterData) return filterData;
+      try {
+        const r = await fetch("filters.json");
+        filterData = r.ok ? await r.json() : { districts: {} };
+      } catch (e) {
+        filterData = { districts: {} };
       }
+      return filterData;
+    };
+
+    stateFilter.addEventListener("change", async () => {
+      districtFilter.innerHTML = '<option value="all">All Districts</option>';
+      if (stateFilter.value === "all") return;
+      const fd = await loadFilterData();
+      const wanted = stateFilter.value.toLowerCase();
+      const found = new Set();
+      Object.entries(fd.districts || {}).forEach(([st, ds]) => {
+        if (st.toLowerCase().includes(wanted)) ds.forEach((d) => found.add(d));
+      });
+      [...found]
+        .sort((a, b) => a.trim().localeCompare(b.trim()))
+        .forEach((d) => {
+          const o = document.createElement("option");
+          o.value = d;
+          o.textContent = d.trim();
+          districtFilter.appendChild(o);
+        });
     });
 
     // Pagination controls (created here so no HTML change is needed)
@@ -193,14 +235,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const fetchFilteredData = async () => {
       const level = levelFilter.value;
-      const state = document.getElementById("state-filter").value;
+      const state = stateFilter.value;
+      const district = districtFilter.value;
       const location = document.getElementById("location-filter").value;
-      const univType = document.getElementById("univ-type-filter").value;
+      const univType = univTypeFilter.value;
       const collType = collTypeFilter.value;
+      const management = managementFilter.value;
+      const nameQuery = nameSearch.value.trim();
 
       const params = new URLSearchParams();
       if (level !== "all") params.append("level", level);
       if (state !== "all") params.append("state", state);
+      if (district !== "all") params.append("district", district);
+      if (management !== "all" && level !== "university") params.append("management", management);
+      if (nameQuery) params.append("q", nameQuery);
+      params.append("sort", sortFilter.value);
       if (location !== "all") params.append("location_type", location);
       if (univType !== "all") params.append("univ_type", univType);
       if (collType !== "all" && level !== "university") params.append("coll_type", collType);
@@ -230,6 +279,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const loc = getField(item, "Location_Type", "Location") || "N/A";
             const st = getField(item, "State") || "N/A";
             const district = getField(item, "District");
+            const management = !isUniversity ? getField(item, "Management") : null;
             const affiliated = !isUniversity ? getField(item, "University_name") : null;
 
             return `
@@ -238,6 +288,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 <h3>${esc(name)}</h3>
                 <div class="card-details">
                   ${affiliated ? `<p><strong>Affiliated To:</strong> ${esc(affiliated)}</p>` : ""}
+                  ${management ? `<p><strong>Management:</strong> ${esc(management)}</p>` : ""}
                   <p><strong>Established:</strong> ${esc(estYear)}</p>
                   <p><strong>Type:</strong> ${esc(instType)}</p>
                   <p><strong>Location:</strong> ${esc(loc)}, ${district ? esc(district) + ", " : ""}${esc(st)}</p>
@@ -254,6 +305,9 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     applyFiltersBtn.addEventListener("click", () => { page = 1; fetchFilteredData(); });
+    nameSearch.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { page = 1; fetchFilteredData(); }
+    });
     fetchFilteredData();
   }
 
@@ -289,13 +343,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const examInput = document.getElementById("exam-search-input");
 
     const fetchExamData = async () => {
-      const examName = examInput.value.trim();
-      const examCategory = document.getElementById("exam-category-filter").value;
+      const examName = examInput.value; // <select>: value is the search term
+      const examCategory = examInput.selectedOptions[0]?.dataset.cat || "both"; // ug / pg comes from the option group
       const instLevel = document.getElementById("exam-inst-level").value;
       const state = document.getElementById("exam-state-filter").value;
 
       if (!examName) {
-        examListEl.innerHTML = '<p style="color:#ff4444; text-align:center; grid-column: 1 / -1;">Please enter an exam name to search.</p>';
+        examListEl.innerHTML = '<p style="color:#ff4444; text-align:center; grid-column: 1 / -1;">Please select an exam to search.</p>';
         return;
       }
 
@@ -350,8 +404,6 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     applyExamFiltersBtn.addEventListener("click", fetchExamData);
-    examInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") fetchExamData();
-    });
+    examInput.addEventListener("change", fetchExamData); // search as soon as an exam is picked
   }
 });

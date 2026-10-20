@@ -5,6 +5,7 @@
     { "src": "*.html", "use": "@vercel/static" },
     { "src": "style.css", "use": "@vercel/static" },
     { "src": "app.js", "use": "@vercel/static" },
+    { "src": "filters.json", "use": "@vercel/static" },
     { "src": "images/**", "use": "@vercel/static" }
   ],
   "rewrites": [

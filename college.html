@@ -247,6 +247,24 @@
         font-style: italic;
         font-family: Arial, sans-serif;
       }
+
+      .filter-group input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        border: 2px solid #4b5de4;
+        background-color: black;
+        color: white;
+        border-radius: 8px;
+        font-family: Arial, sans-serif;
+        font-size: 12px;
+        height: 40px;
+        padding: 0 10px;
+      }
+      .filter-group input[type="text"]:focus {
+        outline: none;
+        border-color: #00e5ff;
+        box-shadow: 0 0 8px rgba(0, 229, 255, 0.4);
+      }
     </style>
   </head>
   <body>
@@ -267,6 +285,11 @@
       <!-- Search Filter Sidebar -->
       <aside class="sidebar">
         <h2>Search Filters</h2>
+
+        <div class="filter-group">
+          <label>Search by Name</label>
+          <input type="text" id="name-search" placeholder="e.g. Delhi University" />
+        </div>
 
         <div class="filter-group">
           <label>Institution Level</label>
@@ -321,6 +344,13 @@
         </div>
 
         <div class="filter-group">
+          <label>District</label>
+          <select id="district-filter">
+            <option value="all">All Districts</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
           <label>Location Type</label>
           <select id="location-filter">
             <option value="all">Any Location</option>
@@ -357,6 +387,27 @@
             <option value="Constituent">Constituent / University College</option>
             <option value="Recognized">Recognized Center</option>
             <option value="PG Center">PG Center / Off-Campus</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label>Management (Colleges)</label>
+          <select id="management-filter">
+            <option value="all">All Management Types</option>
+            <option value="Private Un-Aided">Private Un-Aided</option>
+            <option value="Private Aided (Government Aided)">Private Aided (Government Aided)</option>
+            <option value="State Government">State Government</option>
+            <option value="Central Government">Central Government</option>
+            <option value="Local Body">Local Body</option>
+            <option value="University">University</option>
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label>Sort By</label>
+          <select id="sort-filter">
+            <option value="name_asc">Name (A → Z)</option>
+            <option value="name_desc">Name (Z → A)</option>
           </select>
         </div>
 

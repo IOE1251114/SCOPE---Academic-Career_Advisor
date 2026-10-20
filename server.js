@@ -44,7 +44,7 @@ app.use(express.json());
 // express.static('./') which would also expose server.js, package.json, etc.
 // (On Vercel the static files are served by the @vercel/static builds.)
 if (!process.env.VERCEL) {
-  const pages = ['index.html', 'login.html', 'college.html', 'exam.html', 'style.css', 'app.js'];
+  const pages = ['index.html', 'login.html', 'college.html', 'exam.html', 'style.css', 'app.js', 'filters.json'];
   pages.forEach((file) => app.get(`/${file}`, (req, res) => res.sendFile(path.join(__dirname, file))));
   app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
   app.use('/images', express.static(path.join(__dirname, 'images')));
@@ -179,6 +179,9 @@ const ALIASES = {
   Location_Type: ['Location_Type', 'Location'],
   University_Type: ['University_Type', 'Type'],
   College_Type: ['College_Type', 'Type'],
+  Management: ['Management'],
+  District: ['District'],
+  Name: ['Name', 'Institution_Name', 'College_Name', 'University_name'],
 };
 const resolveColumn = (info, wanted) => {
   if (!info.columns) return wanted;
@@ -193,16 +196,26 @@ const resolveColumn = (info, wanted) => {
 function applyFilters(q, info, entityType, f) {
   const rules = [
     ['State', f.state, (v) => `%${lit(v)}%`],
-    ['Location_Type', f.location_type, (v) => lit(v)],                 // Urban / Rural (case-insensitive equal)
+    ['District', f.district, (v) => lit(v)],                           // exact (case-insensitive)
+    ['Location_Type', f.location_type, (v) => lit(v)],                 // Urban / Rural
     entityType === 'University'
       ? ['University_Type', f.univ_type, (v) => `${lit(v)}%`]          // "Deemed" matches "Deemed University - ..."
       : ['College_Type', f.coll_type, (v) => `${lit(v)}%`],            // "Affiliated" matches "Affiliated College"
   ];
+  if (entityType === 'College') rules.push(['Management', f.management, (v) => lit(v)]);
+
   for (const [name, value, pattern] of rules) {
     if (!value || value === 'all') continue;
     const col = resolveColumn(info, name);
     if (!col) { console.warn(`⚠️ Column "${name}" not found in "${info.table}"; skipping that filter.`); continue; }
     q = q.ilike(qc(col), pattern(value));
+  }
+
+  // Name search: every word must appear in the name ("Delhi University" finds "University of Delhi")
+  const words = String(f.q || '').trim().split(/\s+/).filter(Boolean).slice(0, 6);
+  if (words.length) {
+    const col = resolveColumn(info, 'Name');
+    if (col) for (const w of words) q = q.ilike(qc(col), `%${lit(w)}%`);
   }
   return q;
 }
@@ -215,7 +228,7 @@ function entityTypes(f) {
   if (f.level !== 'university') types.push('College');
   if (types.length === 2) {
     const u = f.univ_type && f.univ_type !== 'all';
-    const c = f.coll_type && f.coll_type !== 'all';
+    const c = (f.coll_type && f.coll_type !== 'all') || (f.management && f.management !== 'all'); // college-only filters
     if (u && !c) types = ['University'];
     if (c && !u) types = ['College'];
   }
@@ -266,7 +279,11 @@ async function browse(db, f, page) {
     const info = infos[i];
     let q = db.from(info.table).select('*');
     q = applyFilters(q, info, types[i], f);
-    if (info.columns) q = q.order(qc(findKey(info.columns, types[i])));
+    if (info.columns) {
+      const nameCol = resolveColumn(info, 'Name');
+      if (nameCol) q = q.order(qc(nameCol), { ascending: f.sort !== 'name_desc' });
+      q = q.order(qc(findKey(info.columns, types[i]))); // tie-breaker so paging is stable
+    }
     let { data, error } = await q.range(offset, offset + take - 1);
     if (error) {
       console.warn('⚠️ Ordered browse failed, retrying without ORDER BY:', error.message);
@@ -282,15 +299,28 @@ async function browse(db, f, page) {
 }
 
 // ------------------------------------------------------ Exam search (exam.html)
+// Whole-word, case-insensitive regex so "CAT" does not match "eduCATion" and "MAT" not "forMAT".
+const wordRegex = (t) =>
+  (/^\w/.test(t) ? '\\y' : '') + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + (/\w$/.test(t) ? '\\y' : '');
+
 async function matchingCodes(db, entityType, category, term) {
   const kinds = category === 'ug' ? ['ug'] : category === 'pg' ? ['pg'] : ['ug', 'pg'];
   const sets = await Promise.all(
     kinds.map(async (kind) => {
       const ex = await resolveExamTable(db, entityType, kind);
-      const rows = await pagedSelect((ord) => {
-        const q = db.from(ex.table).select('*').ilike(qc(ex.textCol), `%${lit(term)}%`);
-        return ord ? q.order(qc(ex.keyCol)).order(qc(ex.textCol)) : q;
-      });
+      const run = (mode) =>
+        pagedSelect((ord) => {
+          let q = db.from(ex.table).select('*');
+          q = mode === 'regex' ? q.imatch(qc(ex.textCol), wordRegex(term)) : q.ilike(qc(ex.textCol), `%${lit(term)}%`);
+          return ord ? q.order(qc(ex.keyCol)).order(qc(ex.textCol)) : q;
+        });
+      let rows;
+      try {
+        rows = await run('regex');
+      } catch (e) {
+        console.warn('⚠️ Whole-word match failed, falling back to substring match:', e.message);
+        rows = await run('like');
+      }
       return rows.map((r) => r[ex.keyCol]);
     })
   );
@@ -360,7 +390,11 @@ async function searchByExam(db, f, category, term) {
 // ---------------------------------------------------------------- Search route
 app.get('/api/search', verifyToken, async (req, res) => {
   const { level, state, location_type, univ_type, coll_type, include_exams, exam, exam_category } = req.query;
-  const filters = { level, state, location_type, univ_type, coll_type };
+  const filters = {
+    level, state, location_type, univ_type, coll_type,
+    district: req.query.district, management: req.query.management,
+    q: req.query.q, sort: req.query.sort,
+  };
 
   try {
     const db = clientForToken(req.token);
