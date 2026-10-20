@@ -383,6 +383,9 @@ async function searchByExam(db, f, category, term) {
     })
   );
   let rows = groups.flat();
+  const nameOf = (r) => String(r[Object.keys(r).find((k) => norm(k) === 'name')] ?? '').toLowerCase();
+  const dir = f.sort === 'name_desc' ? -1 : 1;
+  rows.sort((a, b) => dir * nameOf(a).localeCompare(nameOf(b)));
   if (rows.length > EXAM_RESULT_CAP) { rows = rows.slice(0, EXAM_RESULT_CAP); truncated = true; }
   return { rows, truncated };
 }
