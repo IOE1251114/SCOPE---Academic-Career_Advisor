@@ -114,6 +114,9 @@ const IN_CHUNK = 100;                                             // codes per .
 
 const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 const chunk = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
+// Column names with spaces/hyphens ("College - AISHE_CODE") must be double-quoted in
+// query-string filters, otherwise the client strips the spaces and Postgres can't find them.
+const qc = (name) => (/^[A-Za-z0-9_]+$/.test(name) ? name : `"${name}"`);
 const lit = (v) => String(v).replace(/[\\%_]/g, '\\$&'); // escape LIKE wildcards in user input
 
 // Postgres column names are case-sensitive. Look at a real row to learn the exact names.
@@ -139,7 +142,10 @@ async function sampleTable(db, candidates) {
 async function resolveTable(db, entityType) {
   if (schemaCache.has(entityType)) return schemaCache.get(entityType);
   const info = await sampleTable(db, TABLES[entityType]);
-  if (info.columns) schemaCache.set(entityType, info);
+  if (info.columns) {
+    schemaCache.set(entityType, info);
+    console.log(`📋 ${entityType} table "${info.table}" columns:`, info.columns.join(' | '));
+  }
   return info;
 }
 
@@ -159,15 +165,28 @@ async function resolveExamTable(db, entityType, kind) {
   return res;
 }
 
-// "AISHE_Code" (universities) / "College - AISHE_CODE" (colleges)
+// "AISHE_Code" (universities) / "College - AISHE_CODE" (colleges). Tolerates renamed columns.
 const findKey = (columns, entityType) => {
-  const wanted = entityType === 'University' ? ['aishecode', 'universityaishecode'] : ['collegeaishecode'];
-  return columns.find((c) => wanted.includes(norm(c))) || columns[0];
+  const codes = columns.filter((c) => /aishecode$/.test(norm(c)));
+  const own = codes.find((c) =>
+    entityType === 'University' ? !/^college/.test(norm(c)) : !/^university/.test(norm(c))
+  );
+  return own || codes[0] || columns[0];
 };
 
+const ALIASES = {
+  State: ['State', 'State_UT', 'StateName'],
+  Location_Type: ['Location_Type', 'Location'],
+  University_Type: ['University_Type', 'Type'],
+  College_Type: ['College_Type', 'Type'],
+};
 const resolveColumn = (info, wanted) => {
   if (!info.columns) return wanted;
-  return info.columns.find((c) => norm(c) === norm(wanted)) || null;
+  for (const name of ALIASES[wanted] || [wanted]) {
+    const hit = info.columns.find((c) => norm(c) === norm(name));
+    if (hit) return hit;
+  }
+  return null;
 };
 
 // Adds the sidebar filters to a query. Column names come from the real schema.
@@ -183,7 +202,7 @@ function applyFilters(q, info, entityType, f) {
     if (!value || value === 'all') continue;
     const col = resolveColumn(info, name);
     if (!col) { console.warn(`⚠️ Column "${name}" not found in "${info.table}"; skipping that filter.`); continue; }
-    q = q.ilike(col, pattern(value));
+    q = q.ilike(qc(col), pattern(value));
   }
   return q;
 }
@@ -204,10 +223,17 @@ function entityTypes(f) {
 }
 
 // Read every page of a query (Supabase returns max 1000 rows per request).
+// build(ordered) returns a query; if ordering by an odd column name fails we retry unordered.
 async function pagedSelect(build, max = 50000) {
   const rows = [];
+  let ordered = true;
   for (let from = 0; from < max; from += DB_PAGE) {
-    const { data, error } = await build().range(from, from + DB_PAGE - 1);
+    let { data, error } = await build(ordered).range(from, from + DB_PAGE - 1);
+    if (error && ordered) {
+      console.warn('⚠️ Ordered query failed, retrying without ORDER BY:', error.message);
+      ordered = false;
+      ({ data, error } = await build(false).range(from, from + DB_PAGE - 1));
+    }
     if (error) throw new Error(error.message);
     rows.push(...(data || []));
     if (!data || data.length < DB_PAGE) break;
@@ -240,8 +266,13 @@ async function browse(db, f, page) {
     const info = infos[i];
     let q = db.from(info.table).select('*');
     q = applyFilters(q, info, types[i], f);
-    if (info.columns) q = q.order(findKey(info.columns, types[i]));
-    const { data, error } = await q.range(offset, offset + take - 1);
+    if (info.columns) q = q.order(qc(findKey(info.columns, types[i])));
+    let { data, error } = await q.range(offset, offset + take - 1);
+    if (error) {
+      console.warn('⚠️ Ordered browse failed, retrying without ORDER BY:', error.message);
+      let q2 = applyFilters(db.from(info.table).select('*'), info, types[i], f);
+      ({ data, error } = await q2.range(offset, offset + take - 1));
+    }
     if (error) throw new Error(`${types[i]} query failed: ${error.message}`);
     rows.push(...(data || []).map((r) => ({ ...r, entityType: types[i] })));
     remaining -= take;
@@ -256,9 +287,10 @@ async function matchingCodes(db, entityType, category, term) {
   const sets = await Promise.all(
     kinds.map(async (kind) => {
       const ex = await resolveExamTable(db, entityType, kind);
-      const rows = await pagedSelect(() =>
-        db.from(ex.table).select('*').ilike(ex.textCol, `%${lit(term)}%`).order(ex.keyCol).order(ex.textCol)
-      );
+      const rows = await pagedSelect((ord) => {
+        const q = db.from(ex.table).select('*').ilike(qc(ex.textCol), `%${lit(term)}%`);
+        return ord ? q.order(qc(ex.keyCol)).order(qc(ex.textCol)) : q;
+      });
       return rows.map((r) => r[ex.keyCol]);
     })
   );
@@ -275,7 +307,7 @@ async function institutionsByCodes(db, entityType, codes, f, limit) {
   for (; i < groups.length && rows.length < limit; i += 5) {
     const batch = await Promise.all(
       groups.slice(i, i + 5).map(async (g) => {
-        let q = db.from(info.table).select('*').in(keyCol, g);
+        let q = db.from(info.table).select('*').in(qc(keyCol), g);
         q = applyFilters(q, info, entityType, f);
         const { data, error } = await q;
         if (error) throw new Error(`${entityType} query failed: ${error.message}`);
@@ -294,9 +326,10 @@ async function attachExams(db, entityType, items, keyCol) {
     const ex = await resolveExamTable(db, entityType, kind);
     const byCode = new Map();
     for (const g of chunk(codes, IN_CHUNK)) {
-      const rows = await pagedSelect(() =>
-        db.from(ex.table).select('*').in(ex.keyCol, g).order(ex.keyCol).order(ex.textCol)
-      );
+      const rows = await pagedSelect((ord) => {
+        const q = db.from(ex.table).select('*').in(qc(ex.keyCol), g);
+        return ord ? q.order(qc(ex.keyCol)).order(qc(ex.textCol)) : q;
+      });
       for (const r of rows) {
         if (!byCode.has(r[ex.keyCol])) byCode.set(r[ex.keyCol], []);
         byCode.get(r[ex.keyCol]).push(r[ex.textCol]);
