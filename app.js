@@ -22,12 +22,6 @@ const getField = (item, ...names) => {
   return null;
 };
 
-// Safety-net filter: if the row has no such field we can't judge it, so keep it
-const matches = (item, names, value) => {
-  const v = getField(item, ...names);
-  return v === null || String(v).toLowerCase().includes(value.toLowerCase());
-};
-
 const safeUrl = (u) => {
   const url = String(u).trim();
   if (/^https?:\/\//i.test(url)) return url;
@@ -43,19 +37,9 @@ const websiteHtml = (item) => {
     : `<span class="no-website">No website available</span>`;
 };
 
-// PostgREST returns an array for one-to-many joins but a single object for one-to-one
-const toArray = (v) => (Array.isArray(v) ? v : v ? [v] : []);
-
-const META_KEY = /(^id$|_id$|^id_|code|created|updated)/i;
-const examLabel = (obj) => {
-  const entries = Object.entries(obj).filter(
-    ([k, v]) => !META_KEY.test(k) && v !== null && v !== "" && typeof v !== "object"
-  );
-  const preferred = entries.find(([k]) => /exam/i.test(k)) || entries[0];
-  return preferred ? String(preferred[1]) : null;
-};
-const examList = (rows) => {
-  const labels = [...new Set(toArray(rows).map(examLabel).filter(Boolean))];
+// Exam names arrive as plain arrays of strings from the server
+const examList = (arr) => {
+  const labels = [...new Set((arr || []).filter(Boolean))];
   return labels.length ? labels.join(", ") : "Not Specified";
 };
 
@@ -98,6 +82,12 @@ async function authedSearch(params) {
     throw new Error(data.error || "Failed to fetch data");
   }
   if (!Array.isArray(data)) throw new Error("Unexpected data format received from server.");
+  data.meta = {
+    total: Number(response.headers.get("X-Total-Count")) || data.length,
+    page: Number(response.headers.get("X-Page")) || 1,
+    pageSize: Number(response.headers.get("X-Page-Size")) || data.length,
+    truncated: response.headers.get("X-Truncated") === "true",
+  };
   return data;
 }
 
@@ -184,6 +174,23 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
+    // Pagination controls (created here so no HTML change is needed)
+    let page = 1;
+    const pager = document.createElement("div");
+    pager.style.cssText = "display:flex;justify-content:center;align-items:center;gap:15px;margin:25px 0;font-family:Arial,sans-serif;font-size:13px;";
+    list.after(pager);
+
+    const renderPager = (meta) => {
+      const pages = Math.max(1, Math.ceil(meta.total / (meta.pageSize || 1)));
+      if (pages <= 1) { pager.innerHTML = `<span style="color:#aaa">${meta.total} institution(s)</span>`; return; }
+      pager.innerHTML = `
+        <button id="prev-page" ${page <= 1 ? "disabled" : ""}>← Previous</button>
+        <span style="color:#aaa">Page ${page} of ${pages} · ${meta.total} institutions</span>
+        <button id="next-page" ${page >= pages ? "disabled" : ""}>Next →</button>`;
+      document.getElementById("prev-page").onclick = () => { page--; fetchFilteredData(); window.scrollTo({ top: 250, behavior: "smooth" }); };
+      document.getElementById("next-page").onclick = () => { page++; fetchFilteredData(); window.scrollTo({ top: 250, behavior: "smooth" }); };
+    };
+
     const fetchFilteredData = async () => {
       const level = levelFilter.value;
       const state = document.getElementById("state-filter").value;
@@ -197,19 +204,14 @@ document.addEventListener("DOMContentLoaded", () => {
       if (location !== "all") params.append("location_type", location);
       if (univType !== "all") params.append("univ_type", univType);
       if (collType !== "all" && level !== "university") params.append("coll_type", collType);
+      params.append("page", page);
 
       list.innerHTML = '<p style="color:#00E5FF; text-align:center; grid-column: 1 / -1;">Loading institutions...</p>';
+      pager.innerHTML = "";
 
       try {
-        let data = await authedSearch(params);
+        const data = await authedSearch(params);
         if (!data) return;
-
-        // Safety-net filtering (server already filters; this only trims anything it couldn't)
-        if (univType !== "all") data = data.filter((i) => matches(i, ["University_Type"], univType));
-        if (location !== "all") data = data.filter((i) => matches(i, ["Location_Type", "Location"], location));
-        if (collType !== "all" && level !== "university") {
-          data = data.filter((i) => i.entityType === "University" || matches(i, ["College_Type"], collType));
-        }
 
         if (data.length === 0) {
           list.innerHTML = '<p style="color:#ccc; text-align:center; grid-column: 1 / -1;">No institutions match your filters.</p>';
@@ -226,7 +228,8 @@ document.addEventListener("DOMContentLoaded", () => {
             const estYear = getField(item, "Establishment_Year", "Established_year") || "N/A";
             const instType = getField(item, isUniversity ? "University_Type" : "College_Type") || "N/A";
             const loc = getField(item, "Location_Type", "Location") || "N/A";
-            const state = getField(item, "State") || "N/A";
+            const st = getField(item, "State") || "N/A";
+            const district = getField(item, "District");
             const affiliated = !isUniversity ? getField(item, "University_name") : null;
 
             return `
@@ -237,19 +240,20 @@ document.addEventListener("DOMContentLoaded", () => {
                   ${affiliated ? `<p><strong>Affiliated To:</strong> ${esc(affiliated)}</p>` : ""}
                   <p><strong>Established:</strong> ${esc(estYear)}</p>
                   <p><strong>Type:</strong> ${esc(instType)}</p>
-                  <p><strong>Location:</strong> ${esc(loc)}, ${esc(state)}</p>
+                  <p><strong>Location:</strong> ${esc(loc)}, ${district ? esc(district) + ", " : ""}${esc(st)}</p>
                 </div>
                 ${websiteHtml(item)}
               </div>`;
           })
           .join("");
+        renderPager(data.meta);
       } catch (error) {
         console.error("Search error:", error);
         list.innerHTML = `<p style="color:#ff4444; text-align:center; grid-column: 1 / -1;">Error: ${esc(error.message)}</p>`;
       }
     };
 
-    applyFiltersBtn.addEventListener("click", fetchFilteredData);
+    applyFiltersBtn.addEventListener("click", () => { page = 1; fetchFilteredData(); });
     fetchFilteredData();
   }
 
@@ -298,8 +302,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const params = new URLSearchParams();
       if (instLevel !== "all") params.append("level", instLevel);
       if (state !== "all") params.append("state", state);
-      params.append("include_exams", "true"); // server joins the exam tables...
-      params.append("exam", examName); //        ...and filters on this term
+      params.append("include_exams", "true"); // server looks the exam up in the exam tables
+      params.append("exam", examName);
       params.append("exam_category", examCategory);
 
       examListEl.innerHTML = '<p style="color:#00E5FF; text-align:center; grid-column: 1 / -1;">Searching for institutions...</p>';
@@ -313,11 +317,15 @@ document.addEventListener("DOMContentLoaded", () => {
           return;
         }
 
-        examListEl.innerHTML = data
+        const note = data.meta.truncated
+          ? `<p style="color:#ffb300; text-align:center; grid-column: 1 / -1; font-family:Arial,sans-serif; font-size:13px;">Showing the first ${data.length} matches. Pick a state or institution level to narrow the results.</p>`
+          : `<p style="color:#aaa; text-align:center; grid-column: 1 / -1; font-family:Arial,sans-serif; font-size:13px;">${data.length} institution(s) found.</p>`;
+
+        examListEl.innerHTML = note + data
           .map((item) => {
             const isUniv = item.entityType === "University";
-            const ugExams = examList(isUniv ? item.university_ug_exams : item.college_ug_exams);
-            const pgExams = examList(isUniv ? item.university_pg_exams : item.college_pg_exams);
+            const ugExams = examList(item.ug_exams);
+            const pgExams = examList(item.pg_exams);
             const name = getField(item, "Name", "University_name") || "Unknown Institution";
 
             return `

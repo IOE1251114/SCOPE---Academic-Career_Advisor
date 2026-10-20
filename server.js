@@ -100,130 +100,253 @@ const TABLES = {
   College: ['colleges', 'College_rows'],
 };
 
-const EXAM_RELATIONS = {
-  University: 'university_ug_exams(*), university_pg_exams(*)',
-  College: 'college_ug_exams(*), college_pg_exams(*)',
+// Exam tables are joined in code (not with PostgREST embedding), so no
+// foreign-key relationship has to exist in Supabase.
+const EXAM_TABLES = {
+  University: { ug: 'university_ug_exams', pg: 'university_pg_exams' },
+  College: { ug: 'college_ug_exams', pg: 'college_pg_exams' },
 };
 
-const PAGE_SIZE = 1000;                                           // Supabase's max rows per request
-const MAX_ROWS = Number(process.env.MAX_ROWS_PER_TABLE) || 1000;  // normal browsing
-const EXAM_SCAN_CAP = Number(process.env.EXAM_SCAN_CAP) || 10000; // exam search scans more rows
+const PAGE_SIZE = Number(process.env.PAGE_SIZE) || 60;            // cards per page when browsing
+const EXAM_RESULT_CAP = Number(process.env.EXAM_RESULT_CAP) || 300; // max institutions per exam search
+const DB_PAGE = 1000;                                             // Supabase's max rows per request
+const IN_CHUNK = 100;                                             // codes per .in() request (URL length)
 
 const norm = (s) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
-const toArray = (v) => (Array.isArray(v) ? v : v ? [v] : []);
+const chunk = (arr, n) => Array.from({ length: Math.ceil(arr.length / n) }, (_, i) => arr.slice(i * n, i * n + n));
+const lit = (v) => String(v).replace(/[\\%_]/g, '\\$&'); // escape LIKE wildcards in user input
 
-// Postgres column names are case-sensitive ("Location_Type" != "Location_type").
-// Look at a real row to learn the exact names instead of guessing.
+// Postgres column names are case-sensitive. Look at a real row to learn the exact names.
 const schemaCache = new Map();
 
-async function resolveTable(db, entityType) {
-  if (schemaCache.has(entityType)) return schemaCache.get(entityType);
-
+async function sampleTable(db, candidates) {
   let lastError = null;
   let emptyTable = null;
-
-  for (const table of TABLES[entityType]) {
+  for (const table of candidates) {
     const { data, error } = await db.from(table).select('*').limit(1);
     if (error) { lastError = error; continue; }
     if (!data || data.length === 0) {
-      // Empty table OR Row Level Security hiding every row from this user.
-      console.warn(`⚠️ Table "${table}" returned 0 rows. If it has data, check its RLS SELECT policy.`);
+      console.warn(`⚠️ Table "${table}" returned 0 rows. If it has data, check its RLS SELECT policy (role: authenticated).`);
       emptyTable = emptyTable || { table, columns: null };
       continue;
     }
-    const info = { table, columns: Object.keys(data[0]) };
-    schemaCache.set(entityType, info);
-    return info;
+    return { table, columns: Object.keys(data[0]) };
   }
-  if (emptyTable) return emptyTable; // not cached, so we retry next time
-  throw new Error(`Could not read ${entityType} table (${lastError?.message || 'unknown error'})`);
+  if (emptyTable) return emptyTable;
+  throw new Error(`Could not read table ${candidates[0]} (${lastError?.message || 'unknown error'})`);
 }
 
+async function resolveTable(db, entityType) {
+  if (schemaCache.has(entityType)) return schemaCache.get(entityType);
+  const info = await sampleTable(db, TABLES[entityType]);
+  if (info.columns) schemaCache.set(entityType, info);
+  return info;
+}
+
+// Exam table: first find the AISHE-code column, the other column holds the exam name.
+async function resolveExamTable(db, entityType, kind) {
+  const name = EXAM_TABLES[entityType][kind];
+  const cacheKey = `exam:${name}`;
+  if (schemaCache.has(cacheKey)) return schemaCache.get(cacheKey);
+  const info = await sampleTable(db, [name]);
+  if (!info.columns) {
+    throw new Error(`Table "${name}" returned no rows. Check that it has data and an RLS SELECT policy for logged-in users.`);
+  }
+  const keyCol = findKey(info.columns, entityType);
+  const textCol = info.columns.find((c) => c !== keyCol && /exam/i.test(c)) || info.columns.find((c) => c !== keyCol);
+  const res = { table: name, keyCol, textCol };
+  schemaCache.set(cacheKey, res);
+  return res;
+}
+
+// "AISHE_Code" (universities) / "College - AISHE_CODE" (colleges)
+const findKey = (columns, entityType) => {
+  const wanted = entityType === 'University' ? ['aishecode', 'universityaishecode'] : ['collegeaishecode'];
+  return columns.find((c) => wanted.includes(norm(c))) || columns[0];
+};
+
 const resolveColumn = (info, wanted) => {
-  if (!info.columns) return wanted; // schema unknown, use the name as given
+  if (!info.columns) return wanted;
   return info.columns.find((c) => norm(c) === norm(wanted)) || null;
 };
 
-async function fetchTable(db, entityType, f, cap) {
-  const info = await resolveTable(db, entityType);
-
-  const filters = [
-    ['State', f.state],
-    ['Location_Type', f.location_type],
-    ['University_Type', f.univ_type],
+// Adds the sidebar filters to a query. Column names come from the real schema.
+function applyFilters(q, info, entityType, f) {
+  const rules = [
+    ['State', f.state, (v) => `%${lit(v)}%`],
+    ['Location_Type', f.location_type, (v) => lit(v)],                 // Urban / Rural (case-insensitive equal)
+    entityType === 'University'
+      ? ['University_Type', f.univ_type, (v) => `${lit(v)}%`]          // "Deemed" matches "Deemed University - ..."
+      : ['College_Type', f.coll_type, (v) => `${lit(v)}%`],            // "Affiliated" matches "Affiliated College"
   ];
-  if (entityType === 'College') filters.push(['College_Type', f.coll_type]);
-
-  const active = filters
-    .filter(([, value]) => value && value !== 'all')
-    .map(([name, value]) => ({ column: resolveColumn(info, name), name, value }));
-
-  active.filter((a) => !a.column).forEach((a) =>
-    console.warn(`⚠️ Column "${a.name}" not found in "${info.table}"; skipping that filter.`)
-  );
-
-  const select = f.includeExams ? `*, ${EXAM_RELATIONS[entityType]}` : '*';
-  const rows = [];
-
-  for (let from = 0; from < cap; from += PAGE_SIZE) {
-    const to = Math.min(from + PAGE_SIZE, cap) - 1;
-    let q = db.from(info.table).select(select).range(from, to);
-    if (info.columns && cap > PAGE_SIZE) q = q.order(info.columns[0]); // stable paging
-    for (const a of active) if (a.column) q = q.ilike(a.column, `%${a.value}%`);
-
-    const { data, error } = await q;
-    if (error) {
-      const hint = f.includeExams
-        ? ' (exam tables must have a foreign key to this table and be named ' + EXAM_RELATIONS[entityType] + ')'
-        : '';
-      throw new Error(`${entityType} query failed: ${error.message}${hint}`);
-    }
-    rows.push(...(data || []));
-    if (!data || data.length < to - from + 1) break; // last page
+  for (const [name, value, pattern] of rules) {
+    if (!value || value === 'all') continue;
+    const col = resolveColumn(info, name);
+    if (!col) { console.warn(`⚠️ Column "${name}" not found in "${info.table}"; skipping that filter.`); continue; }
+    q = q.ilike(col, pattern(value));
   }
-
-  return rows.map((item) => ({ ...item, entityType }));
+  return q;
 }
 
-// Exam rows: ignore id / code / timestamp columns, look at the text columns.
-const META_KEY = /(^id$|_id$|^id_|code|created|updated)/i;
-const examTexts = (rowsOrObj) =>
-  toArray(rowsOrObj).flatMap((o) =>
-    Object.entries(o)
-      .filter(([k, v]) => !META_KEY.test(k) && v !== null && typeof v !== 'object')
-      .map(([, v]) => String(v).toLowerCase())
-  );
+// Which tables take part. With "both", picking only a University Type (or only a
+// College Type) means the user wants just that kind of institution.
+function entityTypes(f) {
+  let types = [];
+  if (f.level !== 'college') types.push('University');
+  if (f.level !== 'university') types.push('College');
+  if (types.length === 2) {
+    const u = f.univ_type && f.univ_type !== 'all';
+    const c = f.coll_type && f.coll_type !== 'all';
+    if (u && !c) types = ['University'];
+    if (c && !u) types = ['College'];
+  }
+  return types;
+}
 
-function acceptsExam(item, category, term) {
-  const isUniv = item.entityType === 'University';
-  const ug = examTexts(isUniv ? item.university_ug_exams : item.college_ug_exams);
-  const pg = examTexts(isUniv ? item.university_pg_exams : item.college_pg_exams);
-  const pool = category === 'ug' ? ug : category === 'pg' ? pg : [...ug, ...pg];
-  return pool.some((t) => t.includes(term));
+// Read every page of a query (Supabase returns max 1000 rows per request).
+async function pagedSelect(build, max = 50000) {
+  const rows = [];
+  for (let from = 0; from < max; from += DB_PAGE) {
+    const { data, error } = await build().range(from, from + DB_PAGE - 1);
+    if (error) throw new Error(error.message);
+    rows.push(...(data || []));
+    if (!data || data.length < DB_PAGE) break;
+  }
+  return rows;
+}
+
+// ---------------------------------------------------- Browse (college.html)
+async function browse(db, f, page) {
+  const types = entityTypes(f);
+  const infos = await Promise.all(types.map((t) => resolveTable(db, t)));
+
+  const counts = await Promise.all(
+    types.map(async (t, i) => {
+      const q = applyFilters(db.from(infos[i].table).select('*', { count: 'exact', head: true }), infos[i], t, f);
+      const { count, error } = await q;
+      if (error) throw new Error(`${t} count failed: ${error.message}`);
+      return count || 0;
+    })
+  );
+  const total = counts.reduce((a, b) => a + b, 0);
+
+  let offset = (page - 1) * PAGE_SIZE;
+  let remaining = PAGE_SIZE;
+  const rows = [];
+
+  for (let i = 0; i < types.length && remaining > 0; i++) {
+    if (offset >= counts[i]) { offset -= counts[i]; continue; }
+    const take = Math.min(remaining, counts[i] - offset);
+    const info = infos[i];
+    let q = db.from(info.table).select('*');
+    q = applyFilters(q, info, types[i], f);
+    if (info.columns) q = q.order(findKey(info.columns, types[i]));
+    const { data, error } = await q.range(offset, offset + take - 1);
+    if (error) throw new Error(`${types[i]} query failed: ${error.message}`);
+    rows.push(...(data || []).map((r) => ({ ...r, entityType: types[i] })));
+    remaining -= take;
+    offset = 0;
+  }
+  return { rows, total };
+}
+
+// ------------------------------------------------------ Exam search (exam.html)
+async function matchingCodes(db, entityType, category, term) {
+  const kinds = category === 'ug' ? ['ug'] : category === 'pg' ? ['pg'] : ['ug', 'pg'];
+  const sets = await Promise.all(
+    kinds.map(async (kind) => {
+      const ex = await resolveExamTable(db, entityType, kind);
+      const rows = await pagedSelect(() =>
+        db.from(ex.table).select('*').ilike(ex.textCol, `%${lit(term)}%`).order(ex.keyCol).order(ex.textCol)
+      );
+      return rows.map((r) => r[ex.keyCol]);
+    })
+  );
+  return [...new Set(sets.flat())];
+}
+
+async function institutionsByCodes(db, entityType, codes, f, limit) {
+  const info = await resolveTable(db, entityType);
+  if (!info.columns) return { rows: [], truncated: false };
+  const keyCol = findKey(info.columns, entityType);
+  const groups = chunk(codes, IN_CHUNK);
+  const rows = [];
+  let i = 0;
+  for (; i < groups.length && rows.length < limit; i += 5) {
+    const batch = await Promise.all(
+      groups.slice(i, i + 5).map(async (g) => {
+        let q = db.from(info.table).select('*').in(keyCol, g);
+        q = applyFilters(q, info, entityType, f);
+        const { data, error } = await q;
+        if (error) throw new Error(`${entityType} query failed: ${error.message}`);
+        return data || [];
+      })
+    );
+    rows.push(...batch.flat());
+  }
+  const truncated = rows.length > limit || i < groups.length;
+  return { rows: rows.slice(0, limit).map((r) => ({ ...r, entityType })), truncated, keyCol };
+}
+
+async function attachExams(db, entityType, items, keyCol) {
+  const codes = items.map((it) => it[keyCol]);
+  for (const kind of ['ug', 'pg']) {
+    const ex = await resolveExamTable(db, entityType, kind);
+    const byCode = new Map();
+    for (const g of chunk(codes, IN_CHUNK)) {
+      const rows = await pagedSelect(() =>
+        db.from(ex.table).select('*').in(ex.keyCol, g).order(ex.keyCol).order(ex.textCol)
+      );
+      for (const r of rows) {
+        if (!byCode.has(r[ex.keyCol])) byCode.set(r[ex.keyCol], []);
+        byCode.get(r[ex.keyCol]).push(r[ex.textCol]);
+      }
+    }
+    items.forEach((it) => { it[`${kind}_exams`] = byCode.get(it[keyCol]) || []; });
+  }
+}
+
+async function searchByExam(db, f, category, term) {
+  const types = entityTypes(f);
+  let truncated = false;
+  const groups = await Promise.all(
+    types.map(async (t) => {
+      const codes = await matchingCodes(db, t, category, term);
+      if (!codes.length) return [];
+      const { rows, truncated: tr, keyCol } = await institutionsByCodes(db, t, codes, f, EXAM_RESULT_CAP);
+      if (tr) truncated = true;
+      await attachExams(db, t, rows, keyCol);
+      return rows;
+    })
+  );
+  let rows = groups.flat();
+  if (rows.length > EXAM_RESULT_CAP) { rows = rows.slice(0, EXAM_RESULT_CAP); truncated = true; }
+  return { rows, truncated };
 }
 
 // ---------------------------------------------------------------- Search route
 app.get('/api/search', verifyToken, async (req, res) => {
   const { level, state, location_type, univ_type, coll_type, include_exams, exam, exam_category } = req.query;
-  const includeExams = include_exams === 'true';
-  const examTerm = String(exam || '').trim().toLowerCase();
-  const filters = { state, location_type, univ_type, coll_type, includeExams };
-  const cap = includeExams ? EXAM_SCAN_CAP : MAX_ROWS;
+  const filters = { level, state, location_type, univ_type, coll_type };
 
   try {
     const db = clientForToken(req.token);
-    const jobs = [];
-    if (level !== 'college') jobs.push(fetchTable(db, 'University', filters, cap));
-    if (level !== 'university') jobs.push(fetchTable(db, 'College', filters, cap));
 
-    let results = (await Promise.all(jobs)).flat();
-
-    // Exam matching happens here so it covers every row, not just the first 1000
-    if (includeExams && examTerm) {
-      results = results.filter((item) => acceptsExam(item, exam_category || 'both', examTerm));
+    if (include_exams === 'true') {
+      const term = String(exam || '').trim();
+      if (!term) return res.json([]);
+      const { rows, truncated } = await searchByExam(db, filters, exam_category || 'both', term);
+      res.set('X-Truncated', String(truncated));
+      res.set('X-Total-Count', String(rows.length));
+      return res.json(rows);
     }
 
-    res.json(results);
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const { rows, total } = await browse(db, filters, page);
+    res.set('X-Total-Count', String(total));
+    res.set('X-Page', String(page));
+    res.set('X-Page-Size', String(PAGE_SIZE));
+    res.json(rows);
   } catch (err) {
     console.error('Search error:', err);
     res.status(500).json({ error: err.message || 'Server error processing search' });
